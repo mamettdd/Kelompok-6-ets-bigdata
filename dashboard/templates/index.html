@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirQuality Alert Dashboard - Kelompok X</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f0f2f5; color: #333; }
+        .header { background-color: #1a73e8; color: white; padding: 20px; text-align: center; }
+        .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px; max-width: 1200px; margin: auto; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; }
+        .full-width { grid-column: 1 / -1; }
+        h2 { color: #1a73e8; border-bottom: 2px solid #e8eaed; padding-bottom: 10px; margin-top: 0; }
+        .data-item { margin-bottom: 10px; padding: 10px; border-radius: 4px; background: #f8f9fa; }
+        .news-item { border-left: 4px solid #1a73e8; padding-left: 15px; margin-bottom: 15px; }
+        .footer { text-align: center; padding: 20px; font-size: 0.9em; color: #70757a; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
+        .status-good { background: #e6f4ea; color: #1e8e3e; }
+        .status-warn { background: #fef7e0; color: #f9ab00; }
+        .status-bad { background: #fce8e6; color: #d93025; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🌫️ AirQuality Alert: Jawa Timur</h1>
+        <p>Monitoring Real-time Kualitas Udara (Hadoop - Kafka - Spark)</p>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>📊 Analisis Historis (Spark)</h2>
+            <div id="spark-panel">Memuat hasil pengolahan HDFS...</div>
+        </div>
+
+        <div class="card">
+            <h2>📍 Kondisi Saat Ini (Live API)</h2>
+            <div id="api-panel">Menunggu data dari Kafka...</div>
+        </div>
+
+        <div class="card full-width">
+            <h2>📰 Berita Lingkungan Terbaru</h2>
+            <div id="rss-panel">Mencari berita terbaru...</div>
+        </div>
+    </div>
+
+    <div class="footer">
+        ETS Big Data & Data Lakehouse - 2026
+    </div>
+
+    <script>
+        async function fetchData() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                if (data.api && data.api.city) {
+                    document.getElementById('api-panel').innerHTML = `
+                        <div class="data-item">
+                            <p><strong>Kota:</strong> ${data.api.city}</p>
+                            <p><strong>Polutan:</strong> ${data.api.parameter}</p>
+                            <p><strong>Nilai:</strong> ${data.api.value} ${data.api.unit}</p>
+                            <p><small>Diperbarui: ${data.api.timestamp}</small></p>
+                        </div>
+                    `;
+                }
+
+                if (data.spark && Array.isArray(data.spark)) {
+                    let sparkHTML = "<ul>";
+                    data.spark.slice(0, 5).forEach(item => {
+                        sparkHTML += `<li>${item.city}: ${parseFloat(item.average_pollution).toFixed(2)}</li>`;
+                    });
+                    sparkHTML += "</ul>";
+                    document.getElementById('spark-panel').innerHTML = sparkHTML;
+                }
+
+                if (data.rss && data.rss.title) {
+                    document.getElementById('rss-panel').innerHTML = `
+                        <div class="news-item">
+                            <h3>${data.rss.title}</h3>
+                            <p>${data.rss.summary}</p>
+                            <a href="${data.rss.link}" target="_blank">Baca Selengkapnya &rarr;</a>
+                            <p><small>Sumber: ${data.rss.published}</small></p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error("Gagal mengambil data:", error);
+            }
+        }
+
+        fetchData();
+        setInterval(fetchData, 30000); 
+    </script>
+</body>
+</html>
