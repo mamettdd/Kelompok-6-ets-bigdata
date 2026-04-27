@@ -1,0 +1,13 @@
+kafka-python==2.0.2
+feedparser==6.0.11
+requests==2.32.3
+hdfs==2.7.3
+pyspark==3.5.1
+flask==3.0.3
+pandas==2.2.2
+notebook==7.2.1
+ipykernel==6.29.5
+python-dotenv==1.0.1
+numpy==1.26.4
+scikit-learn==1.5.1
+
