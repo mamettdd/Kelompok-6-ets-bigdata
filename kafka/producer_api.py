@@ -1,16 +1,13 @@
-# [Nama Anggota]: producer_api.py
 import time
 import json
 import requests
 from kafka import KafkaProducer
 
-# Inisialisasi Producer
 producer = KafkaProducer(
     bootstrap_servers=['localhost:9092'],
     value_serializer=lambda x: json.dumps(x).encode('utf-8')
 )
 
-# Daftar kota sesuai topik (AirQuality Jawa Timur)
 CITIES = ["Surabaya", "Malang", "Sidoarjo", "Gresik"]
 
 def fetch_air_quality(city):
@@ -20,7 +17,6 @@ def fetch_air_quality(city):
         data = response.json()
         if data['results']:
             res = data['results'][0]
-            # Ambil parameter pertama (misal PM2.5)
             payload = {
                 "city": city,
                 "parameter": res['measurements'][0]['parameter'],
@@ -41,5 +37,4 @@ while True:
             producer.send('airquality-api', value=data)
             print(f"Mengirim data {city}: {data['value']} {data['unit']}")
     
-    # Tunggu 15 menit sebelum ambil data lagi (sesuai instruksi polling)
     time.sleep(900)
