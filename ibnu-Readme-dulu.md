@@ -1,5 +1,5 @@
 sebelum jalanin install semua paketnya dulu (terminal) :
-cd /home/wowo/tugas/Kelompok-6-ets-bigdata
+cd /Kelompok-6-ets-bigdata
 
 python3 -m venv .venv
 source .venv/bin/activate
