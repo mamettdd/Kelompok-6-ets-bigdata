@@ -1,97 +1,354 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AirQuality Alert Dashboard - Kelompok X</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f0f2f5; color: #333; }
-        .header { background-color: #1a73e8; color: white; padding: 20px; text-align: center; }
-        .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px; max-width: 1200px; margin: auto; }
-        .card { background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; }
-        .full-width { grid-column: 1 / -1; }
-        h2 { color: #1a73e8; border-bottom: 2px solid #e8eaed; padding-bottom: 10px; margin-top: 0; }
-        .data-item { margin-bottom: 10px; padding: 10px; border-radius: 4px; background: #f8f9fa; }
-        .news-item { border-left: 4px solid #1a73e8; padding-left: 15px; margin-bottom: 15px; }
-        .footer { text-align: center; padding: 20px; font-size: 0.9em; color: #70757a; }
-        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
-        .status-good { background: #e6f4ea; color: #1e8e3e; }
-        .status-warn { background: #fef7e0; color: #f9ab00; }
-        .status-bad { background: #fce8e6; color: #d93025; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AirQuality Alert — Kelompok {{ kelompok|default(6) }} · ETS Big Data</title>
+  <script>
+    (function () {
+      try {
+        var k = 'airquality-theme';
+        var t = localStorage.getItem(k);
+        if (t !== 'light' && t !== 'dark') {
+          t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 </head>
-<body>
+<body class="{{ body_class|default('dashboard') }}">
+  <div class="header">
+    <div class="header-inner">
+      <div class="header-text">
+        <h1>AirQuality Alert: Jawa Timur</h1>
+        <p>Pipeline Kafka &rarr; HDFS &rarr; Spark &mdash; monitoring kualitas udara Gerbangkertasusila</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">Gelap</button>
+      </div>
+    </div>
+  </div>
 
-    <div class="header">
-        <h1>🌫️ AirQuality Alert: Jawa Timur</h1>
-        <p>Monitoring Real-time Kualitas Udara (Hadoop - Kafka - Spark)</p>
+  <div id="demo-bar" class="badge-bar" role="status"></div>
+
+  <div class="container">
+    <div class="card full-width card--legend">
+      <h2>Legenda kategori AQI (Indeks WAQI)</h2>
+      <div class="legend">
+        <span class="aqi-bagus">Baik 0&ndash;50</span>
+        <span class="aqi-sedang">Sedang 51&ndash;100</span>
+        <span class="aqi-tidak-sehat">Tidak Sehat 101&ndash;150</span>
+        <span class="aqi-berbahaya">Berbahaya &gt;150</span>
+      </div>
     </div>
 
-    <div class="container">
-        <div class="card">
-            <h2>📊 Analisis Historis (Spark)</h2>
-            <div id="spark-panel">Memuat hasil pengolahan HDFS...</div>
-        </div>
-
-        <div class="card">
-            <h2>📍 Kondisi Saat Ini (Live API)</h2>
-            <div id="api-panel">Menunggu data dari Kafka...</div>
-        </div>
-
-        <div class="card full-width">
-            <h2>📰 Berita Lingkungan Terbaru</h2>
-            <div id="rss-panel">Mencari berita terbaru...</div>
-        </div>
+    <div class="card full-width">
+      <h2>Analisis historis (Spark &rarr; <code>spark_results.json</code>)</h2>
+      <div id="spark-panel"><p class="loading">Memuat&hellip;</p></div>
+      <p class="tiny" id="spark-generated"></p>
     </div>
 
-    <div class="footer">
-        ETS Big Data & Data Lakehouse - 2026
+    <div class="card full-width card--chart">
+      <h2>Visualisasi: nilai rata-rata (analisis 2)</h2>
+      <p class="tiny" id="chart-caption">Batang = rata-rata AQI (contoh / dari Spark)</p>
+      <div class="chart-wrap"><canvas id="spark-chart"></canvas></div>
     </div>
 
-    <script>
-        async function fetchData() {
-            try {
-                const response = await fetch('/api/status');
-                const data = await response.json();
+    <div class="card full-width">
+      <h2>Tabel AQI per kota (live dari consumer &rarr; <code>live_api.json</code>)</h2>
+      <div id="api-panel"><p class="loading">Memuat&hellip;</p></div>
+    </div>
 
-                if (data.api && data.api.city) {
-                    document.getElementById('api-panel').innerHTML = `
-                        <div class="data-item">
-                            <p><strong>Kota:</strong> ${data.api.city}</p>
-                            <p><strong>Polutan:</strong> ${data.api.parameter}</p>
-                            <p><strong>Nilai:</strong> ${data.api.value} ${data.api.unit}</p>
-                            <p><small>Diperbarui: ${data.api.timestamp}</small></p>
-                        </div>
-                    `;
-                }
+    <div class="card full-width">
+      <h2>Berita lingkungan (live dari consumer &rarr; <code>live_rss.json</code>)</h2>
+      <div id="rss-panel"><p class="loading">Memuat&hellip;</p></div>
+    </div>
+  </div>
 
-                if (data.spark && Array.isArray(data.spark)) {
-                    let sparkHTML = "<ul>";
-                    data.spark.slice(0, 5).forEach(item => {
-                        sparkHTML += `<li>${item.city}: ${parseFloat(item.average_pollution).toFixed(2)}</li>`;
-                    });
-                    sparkHTML += "</ul>";
-                    document.getElementById('spark-panel').innerHTML = sparkHTML;
-                }
+  <div class="footer">
+    ETS Big Data &amp; Data Lakehouse &middot; Auto-refresh setiap 30 detik
+    <span id="last-refresh" class="tiny footer-refresh"></span>
+  </div>
 
-                if (data.rss && data.rss.title) {
-                    document.getElementById('rss-panel').innerHTML = `
-                        <div class="news-item">
-                            <h3>${data.rss.title}</h3>
-                            <p>${data.rss.summary}</p>
-                            <a href="${data.rss.link}" target="_blank">Baca Selengkapnya &rarr;</a>
-                            <p><small>Sumber: ${data.rss.published}</small></p>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                console.error("Gagal mengambil data:", error);
-            }
+  <script>
+    function esc(s) {
+      if (s === undefined || s === null) return '';
+      const t = String(s);
+      return t
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    let chartInstance = null;
+    const THEME_KEY = 'airquality-theme';
+
+    function isDarkTheme() {
+      return document.documentElement.getAttribute('data-theme') === 'dark';
+    }
+
+    function getChartTheme() {
+      if (isDarkTheme()) {
+        return {
+          barBg: 'rgba(88, 166, 255, 0.75)',
+          barBorder: 'rgba(121, 192, 255, 1)',
+          grid: 'rgba(240, 246, 252, 0.12)',
+          tick: '#8b949e',
+          title: '#e6edf3',
+        };
+      }
+      return {
+        barBg: 'rgba(15, 76, 129, 0.85)',
+        barBorder: 'rgba(10, 50, 86, 1)',
+        grid: 'rgba(0, 0, 0, 0.08)',
+        tick: '#37474f',
+        title: '#263238',
+      };
+    }
+
+    function applyChartTheme() {
+      if (!chartInstance) return;
+      const th = getChartTheme();
+      chartInstance.data.datasets[0].backgroundColor = th.barBg;
+      chartInstance.data.datasets[0].borderColor = th.barBorder;
+      chartInstance.options.scales.x.ticks.color = th.tick;
+      chartInstance.options.scales.x.grid.color = th.grid;
+      chartInstance.options.scales.y.ticks.color = th.tick;
+      chartInstance.options.scales.y.grid.color = th.grid;
+      chartInstance.options.scales.y.title.color = th.title;
+      chartInstance.options.plugins.legend.labels.color = th.title;
+      chartInstance.update();
+    }
+    window.refreshChartTheme = applyChartTheme;
+
+    (function initThemeToggle() {
+      function syncButton() {
+        var btn = document.getElementById('theme-toggle');
+        if (!btn) return;
+        var dark = isDarkTheme();
+        btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+        btn.textContent = dark ? 'Terang' : 'Gelap';
+        btn.setAttribute('aria-label', dark ? 'Aktifkan tema terang' : 'Aktifkan tema gelap');
+      }
+      function setTheme(mode) {
+        if (mode !== 'light' && mode !== 'dark') return;
+        document.documentElement.setAttribute('data-theme', mode);
+        try { localStorage.setItem(THEME_KEY, mode); } catch (e) {}
+        syncButton();
+        if (typeof applyChartTheme === 'function') applyChartTheme();
+      }
+      var btn = document.getElementById('theme-toggle');
+      if (btn) {
+        btn.addEventListener('click', function () {
+          setTheme(isDarkTheme() ? 'light' : 'dark');
+        });
+        syncButton();
+      }
+    })();
+
+    function renderSpark(spark) {
+      const el = document.getElementById('spark-panel');
+      const g = document.getElementById('spark-generated');
+      if (!spark || typeof spark !== 'object') {
+        el.innerHTML = '<p class="err">Tidak ada data Spark.</p>';
+        return;
+      }
+      g.textContent = spark.generated_at
+        ? 'Diperbarui: ' + esc(spark.generated_at)
+        : '';
+      if (spark._demo) g.textContent += ' (contoh bawaan &mdash; jalankan notebook setelah ada data HDFS)';
+
+      const a1 = spark.analysis1 || {};
+      const a2 = spark.analysis2 || {};
+      const a3 = spark.analysis3 || {};
+
+      const rows1 = (a1.rows || []).map(
+        (r) => `<tr>
+          <td>${esc(r.city)}</td>
+          <td>${formatPct(r.baik_pct)}</td>
+          <td>${formatPct(r.sedang_pct)}</td>
+          <td>${formatPct(r.tidak_sehat_pct)}</td>
+          <td>${formatPct(r.berbahaya_pct)}</td>
+        </tr>`
+      ).join('');
+
+      const rows3 = (a3.rows || []).map(
+        (r) => `<tr>
+          <td>${esc(r.city)}</td>
+          <td>${r.avg_aqi != null ? Number(r.avg_aqi).toFixed(1) : '—'}</td>
+          <td>${r.unhealthy_or_worse_events != null ? esc(r.unhealthy_or_worse_events) : '—'}</td>
+        </tr>`
+      ).join('');
+
+      el.innerHTML = `
+        <div class="spark-block">
+          <strong>${esc(a1.title || 'Analisis 1')}</strong>
+          <p class="interpret">${esc(a1.interpretation || '')}</p>
+          <table class="aqi-table">
+            <thead><tr><th>Kota</th><th>Baik %</th><th>Sedang %</th><th>T. Sehat %</th><th>Berbahaya %</th></tr></thead>
+            <tbody>${rows1 || '<tr><td colspan="5">Tidak ada baris (isi dari Spark)</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="spark-block">
+          <strong>${esc(a2.title || 'Analisis 2')}</strong>
+          <p class="interpret">${esc(a2.interpretation || '')}</p>
+        </div>
+        <div class="spark-block">
+          <strong>${esc(a3.title || 'Analisis 3')}</strong>
+          <p class="interpret">${esc(a3.interpretation || '')}</p>
+          <table class="aqi-table">
+            <thead><tr><th>Kota</th><th>Rata AQI</th><th>Event &ge; &ldquo;Tidak Sehat&rdquo;</th></tr></thead>
+            <tbody>${rows3 || '<tr><td colspan="3">Tidak ada baris (isi dari Spark)</td></tr>'}</tbody>
+          </table>
+        </div>
+      `;
+
+      const chartData = a2.chart || [];
+      const ctx = document.getElementById('spark-chart');
+      const labels = chartData.map((c) => c.label || c.city || '—');
+      const values = chartData.map((c) => Number(c.avg_aqi != null ? c.avg_aqi : c.value) || 0);
+      const th = getChartTheme();
+      if (chartInstance) chartInstance.destroy();
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Rata-rata AQI (contoh / Spark)',
+            data: values,
+            backgroundColor: th.barBg,
+            borderColor: th.barBorder,
+            borderWidth: 1,
+            borderRadius: 0,
+            borderSkipped: false,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              labels: { boxWidth: 12, boxHeight: 12, color: th.title },
+            },
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              grid: { lineWidth: 1, color: th.grid },
+              ticks: { color: th.tick },
+              title: { display: true, text: 'AQI', color: th.title },
+            },
+            x: {
+              grid: { display: true, lineWidth: 1, color: th.grid },
+              ticks: { color: th.tick },
+            },
+          },
+        },
+      });
+    }
+
+    function formatPct(v) {
+      if (v === undefined || v === null || v === '') return '—';
+      return Number(v).toFixed(1) + '%';
+    }
+
+    function renderApi(data) {
+      const el = document.getElementById('api-panel');
+      const cities = (data && data.cities) ? data.cities : [];
+      if (!cities.length) {
+        el.innerHTML = '<p class="err">Tidak ada data kota.</p>';
+        return;
+      }
+      const rows = cities.map((row) => {
+        const aqi = row.aqi != null ? Number(row.aqi) : 0;
+        const cls = row.category_class || 'aqi-bagus';
+        return `<tr>
+          <td><strong>${esc(row.city)}</strong></td>
+          <td>${aqi.toFixed(0)}</td>
+          <td><span class="tag ${cls}">${esc(row.category_label || '')}</span></td>
+          <td class="tiny">${esc(row.timestamp_ingest || row.ts || '')}</td>
+        </tr>`;
+      }).join('');
+      el.innerHTML = `
+        <table class="aqi-table">
+          <thead>
+            <tr><th>Kota</th><th>AQI</th><th>Kategori</th><th>Diperbarui</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${data.is_demo ? '<p class="tiny demo-note">Data contoh &mdash; consumer akan menimpa <code>live_api.json</code>.</p>' : ''}
+      `;
+    }
+
+    function renderRss(data) {
+      const el = document.getElementById('rss-panel');
+      const items = (data && data.items) ? data.items : [];
+      if (!items.length) {
+        el.innerHTML = '<p class="err">Tidak ada berita.</p>';
+        return;
+      }
+      el.innerHTML = `
+        <ul class="rss-list">
+          ${items.map((it) => `
+            <li>
+              <a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(it.title)}</a>
+              <p class="tiny rss-summary">${esc((it.summary || '').slice(0, 220))}${(it.summary && it.summary.length > 220) ? '…' : ''}</p>
+              <span class="tiny">${esc(it.published || it.timestamp_ingest || '')}</span>
+            </li>
+          `).join('')}
+        </ul>
+        ${data.is_demo ? '<p class="tiny">Contoh &mdash; consumer RSS akan menimpa <code>live_rss.json</code>.</p>' : ''}
+      `;
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/data');
+        const j = await res.json();
+        document.getElementById('last-refresh').textContent =
+          'Terakhir fetch: ' + (j.refreshed_at || new Date().toISOString());
+
+        const demoBar = document.getElementById('demo-bar');
+        const sparkDemo = !!(j.spark && j.spark._demo);
+        const apiDemo = !!(j.api && j.api.is_demo);
+        const rssDemo = !!(j.rss && j.rss.is_demo);
+        const allDemo = sparkDemo && apiDemo && rssDemo;
+        const someDemo = sparkDemo || apiDemo || rssDemo;
+        if (allDemo) {
+          demoBar.className = 'badge-bar show demo';
+          demoBar.textContent =
+            'Mode demo penuh: belum ada salinan JSON. Jalankan consumer & Spark agar data nyata menggantikan contoh.';
+        } else if (someDemo) {
+          const pending = [];
+          if (sparkDemo) pending.push('Spark');
+          if (apiDemo) pending.push('AQI live');
+          if (rssDemo) pending.push('Berita RSS');
+          demoBar.className = 'badge-bar show partial';
+          demoBar.textContent =
+            'Pipeline live ✓ — masih menunggu data: ' + pending.join(', ') +
+            ' (panel lain sudah menampilkan data nyata).';
+        } else {
+          demoBar.className = 'badge-bar';
+          demoBar.textContent = '';
         }
 
-        fetchData();
-        setInterval(fetchData, 30000); 
-    </script>
+        renderSpark(j.spark);
+        renderApi(j.api);
+        renderRss(j.rss);
+      } catch (e) {
+        console.error(e);
+        document.getElementById('api-panel').innerHTML =
+          '<p class="err">Gagal memuat <code>/api/data</code>. Pastikan <code>python dashboard/app.py</code> berjalan.</p>';
+      }
+    }
+
+    fetchData();
+    setInterval(fetchData, 30000);
+  </script>
 </body>
 </html>

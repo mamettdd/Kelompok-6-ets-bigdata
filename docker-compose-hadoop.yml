@@ -1,22 +1,99 @@
 version: "3"
+
 services:
   namenode:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: namenode
-    restart: always
+    restart: unless-stopped
     ports:
       - "9870:9870"
       - "9000:9000"
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
     environment:
       - CLUSTER_NAME=test
     env_file:
       - ./hadoop.env
 
-  datanode:
+  # Tiga DataNode = cluster HDFS terdistribusi; replikasi default 2 (hadoop.env)
+  datanode1:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
-    container_name: datanode
-    restart: always
+    container_name: datanode1
+    restart: unless-stopped
+    depends_on:
+      - namenode
+    ports:
+      - "9864:9864"
+    volumes:
+      - hadoop_datanode1:/hadoop/dfs/data
     environment:
       - SERVICE_PRECONDITION=namenode:9870
     env_file:
       - ./hadoop.env
+
+  datanode2:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode2
+    restart: unless-stopped
+    depends_on:
+      - namenode
+    ports:
+      - "9865:9864"
+    volumes:
+      - hadoop_datanode2:/hadoop/dfs/data
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    env_file:
+      - ./hadoop.env
+
+  datanode3:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode3
+    restart: unless-stopped
+    depends_on:
+      - namenode
+    ports:
+      - "9866:9864"
+    volumes:
+      - hadoop_datanode3:/hadoop/dfs/data
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    env_file:
+      - ./hadoop.env
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    restart: unless-stopped
+    depends_on:
+      - namenode
+      - datanode1
+      - datanode2
+      - datanode3
+    ports:
+      - "8088:8088"
+    environment:
+      - SERVICE_PRECONDITION=namenode:9000 datanode1:9864 datanode2:9864 datanode3:9864
+    env_file:
+      - ./hadoop.env
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: nodemanager
+    restart: unless-stopped
+    depends_on:
+      - namenode
+      - datanode1
+      - datanode2
+      - datanode3
+      - resourcemanager
+    environment:
+      - SERVICE_PRECONDITION=namenode:9000 datanode1:9864 datanode2:9864 datanode3:9864 resourcemanager:8088
+    env_file:
+      - ./hadoop.env
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode1:
+  hadoop_datanode2:
+  hadoop_datanode3:

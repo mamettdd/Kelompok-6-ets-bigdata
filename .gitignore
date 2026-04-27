@@ -1,3 +1,36 @@
-dashboard/data/*.json
+# Python virtual env
+.venv/
+venv/
+env/
 
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Environment variables (secrets!)
+.env
+.env.local
+
+# Dashboard runtime data
+dashboard/data/*.json
 !dashboard/data/.gitkeep
+
+# Kafka producer state
+kafka/seen_ids.json
+kafka/.last_*
+
+# Spark / Jupyter
+.ipynb_checkpoints/
+spark-warehouse/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
