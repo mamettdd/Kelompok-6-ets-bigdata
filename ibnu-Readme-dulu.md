@@ -1,7 +1,8 @@
 #sebelum jalanin install semua paketnya dulu (terminal) :
-''''
+
+```
 cd /Kelompok-6-ets-bigdata
-'''
+```
 
 ```
 python3 -m venv .venv
