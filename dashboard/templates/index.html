@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AirQuality Alert — Kelompok {{ kelompok|default(6) }} · ETS Big Data</title>
+  <title>AirQuality Alert — Pemantauan Kualitas Udara Jawa Timur</title>
   <script>
     (function () {
       try {
@@ -19,12 +19,19 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 </head>
-<body class="{{ body_class|default('dashboard') }}">
+<body class="{{ body_class|default('dashboard') }}" data-debug-mode="{{ 'true' if debug_mode else 'false' }}">
+  <div class="gov-topbar">
+    <span>PORTAL RESMI PEMANTAUAN KUALITAS UDARA DAERAH JAWA TIMUR</span>
+    <span>Senin - se-moodnya (efisiensi malas ah) | 08.00 - 16.00 WIB</span>
+  </div>
+
   <div class="header">
     <div class="header-inner">
+      <div class="gov-seal" aria-hidden="true">K6</div>
       <div class="header-text">
+        <p class="gov-kicker">Sistem Informasi Monitoring Lingkungan</p>
         <h1>AirQuality Alert: Jawa Timur</h1>
-        <p>Pipeline Kafka &rarr; HDFS &rarr; Spark &mdash; monitoring kualitas udara Gerbangkertasusila</p>
+        <p>Monitoring kualitas udara Gerbangkertasusila</p>
       </div>
       <div class="header-actions">
         <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">Gelap</button>
@@ -32,48 +39,146 @@
     </div>
   </div>
 
+  <nav class="old-nav" aria-label="Navigasi dashboard">
+    <a href="#spark-panel">Ringkasan Kondisi</a>
+    <a href="#api-panel">Data Kota</a>
+    <a href="#rss-panel">Berita</a>
+  </nav>
+
+  <div class="running-text" aria-label="Informasi berjalan">
+    <marquee scrollamount="4">PERHATIAN: Informasi pada dashboard diperbarui otomatis setiap 30 detik. Pastikan proses pengambilan dan pengolahan data telah berjalan sebelum presentasi dimulai.</marquee>
+  </div>
+
+  {% if debug_mode %}
   <div id="demo-bar" class="badge-bar" role="status"></div>
+  {% endif %}
 
   <div class="container">
-    <div class="card full-width card--legend">
-      <h2>Legenda kategori AQI (Indeks WAQI)</h2>
-      <div class="legend">
-        <span class="aqi-bagus">Baik 0&ndash;50</span>
-        <span class="aqi-sedang">Sedang 51&ndash;100</span>
-        <span class="aqi-tidak-sehat">Tidak Sehat 101&ndash;150</span>
-        <span class="aqi-berbahaya">Berbahaya &gt;150</span>
+    <div class="card full-width card--notice">
+      <h2>Pengumuman Sistem</h2>
+      <p>
+        Dashboard ini menampilkan kondisi kualitas udara wilayah Gerbangkertasusila.
+        Panel di bawah memuat ringkasan kondisi, data terbaru per kota, dan berita lingkungan pendukung.
+      </p>
+    </div>
+
+    <aside class="minister-sidebar" aria-label="Sambutan kementerian">
+      <div class="minister-card">
+        <h2>Prof. Dr. Ir. H. H. Vincent Suwito, Alm</h2>
+        <div class="minister-photo-frame">
+          <img src="{{ url_for('dashboard_asset', filename='kementrian lingkungan hidup.jpg') }}" alt="Figur Kementerian Lingkungan Hidup" />
+        </div>
+        <div class="minister-identity">
+          <strong>Mentri Layanan Berhenti Merokok</strong>
+          <span>Republik Tamiungger Utara</span>
+        </div>
+        <div class="minister-message">
+          <h3>Sambutan</h3>
+          <p>
+            Dengan rahmat Tuhan Yang Maha Esa, pemantauan kualitas udara perlu dilakukan secara tertib,
+            berkelanjutan, dan mudah dipahami oleh seluruh lapisan masyarakat.
+          </p>
+          <p>
+            Melalui portal website ini, budak-budakku dapat melihat kondisi udara per kota serta memperoleh informasi
+            pendukung terkait informasi EMBEGE DUA PORSI.
+          </p>
+          <p class="minister-sign">Tertanda,<br />Mentri Anti Rokok</p>
+        </div>
       </div>
-    </div>
 
-    <div class="card full-width">
-      <h2>Analisis historis (Spark &rarr; <code>spark_results.json</code>)</h2>
-      <div id="spark-panel"><p class="loading">Memuat&hellip;</p></div>
-      <p class="tiny" id="spark-generated"></p>
-    </div>
+      <div class="old-widget">
+        <h2>Maklumat Pelayanan</h2>
+        <ul>
+          <li>Informasi diperbarui berkala.</li>
+          <li>Gunakan data sebagai bahan kewaspadaan.</li>
+          <li>Jaga lingkungan mulai dari sekitar rumah.</li>
+        </ul>
+      </div>
+    </aside>
 
-    <div class="card full-width card--chart">
-      <h2>Visualisasi: nilai rata-rata (analisis 2)</h2>
-      <p class="tiny" id="chart-caption">Batang = rata-rata AQI (contoh / dari Spark)</p>
-      <div class="chart-wrap"><canvas id="spark-chart"></canvas></div>
-    </div>
+    <main class="dashboard-main">
+      <div class="card full-width card--legend">
+        <h2>Legenda kondisi udara</h2>
+        <div class="legend">
+          <span class="aqi-bagus">Baik 0&ndash;50</span>
+          <span class="aqi-sedang">Sedang 51&ndash;100</span>
+          <span class="aqi-tidak-sehat">Tidak Sehat 101&ndash;150</span>
+          <span class="aqi-berbahaya">Berbahaya &gt;150</span>
+        </div>
+      </div>
 
-    <div class="card full-width">
-      <h2>Tabel AQI per kota (live dari consumer &rarr; <code>live_api.json</code>)</h2>
-      <div id="api-panel"><p class="loading">Memuat&hellip;</p></div>
-    </div>
+      <div class="card full-width">
+        <h2>Ringkasan kondisi udara beberapa waktu terakhir</h2>
+        <div id="spark-panel"><p class="loading">Memuat&hellip;</p></div>
+        <p class="tiny" id="spark-generated"></p>
+      </div>
 
-    <div class="card full-width">
-      <h2>Berita lingkungan (live dari consumer &rarr; <code>live_rss.json</code>)</h2>
-      <div id="rss-panel"><p class="loading">Memuat&hellip;</p></div>
-    </div>
+      <div class="card full-width card--chart">
+        <h2>Grafik rata-rata kualitas udara</h2>
+        <p class="tiny" id="chart-caption">Batang menunjukkan rata-rata kualitas udara pada kota dan waktu tertentu</p>
+        <div class="chart-wrap"><canvas id="spark-chart"></canvas></div>
+      </div>
+
+      <div class="card full-width">
+        <h2>Kondisi udara terbaru per kota</h2>
+        <div id="api-panel"><p class="loading">Memuat&hellip;</p></div>
+      </div>
+
+      <div class="card full-width">
+        <h2>Berita lingkungan terkait</h2>
+        <div id="rss-panel"><p class="loading">Memuat&hellip;</p></div>
+      </div>
+    </main>
+
+    <aside class="advisory-sidebar" aria-label="Maklumat keselamatan lingkungan">
+      <div class="minister-card advisory-card">
+        <h2>H. KIM JONG WERR</h2>
+        <div class="minister-photo-frame advisory-photo-frame">
+          <img src="{{ url_for('dashboard_asset', filename='kimjongwer.png') }}" alt="Figur pengingat larangan aktivitas berbahaya bagi lingkungan" />
+        </div>
+        <div class="minister-identity advisory-identity">
+          <strong>PRESIDEN KEPUTIH UTARA</strong>
+          <span>DAN TEMBOK RATAPAN KEPUTIH</span>
+        </div>
+        <div class="minister-message advisory-message">
+          <h3>Maklumat Larangan</h3>
+          <p>
+            Dilarang keras membuat, mencoba, merakit, meniru, atau mempraktikkan bom nuklir secara otodidak,
+            termasuk melalui tutorial Facebook Pro, grup tidak jelas, komentar warung digital, maupun sumber
+            lain yang tidak bertanggung jawab.
+          </p>
+          <p>
+            Tindakan tersebut sangat berbahaya bagi keselamatan manusia, merusak lingkungan, mencemari udara,
+            dan dapat menimbulkan masalah hukum serta bencana yang tidak lucu sama sekali.
+          </p>
+          <p>
+            Gunakan internet untuk hal bermanfaat: membaca informasi kualitas udara, menjaga kebersihan lingkungan,
+            dan tidak menciptakan krisis nuklir rumahan.
+          </p>
+          <p class="minister-sign">Tertanda,<br />Satuan Tugas Anti Rokok Nuklir</p>
+        </div>
+      </div>
+
+      <div class="old-widget advisory-widget">
+        <h2>Daftar Larangan</h2>
+        <ul>
+          <li>Jangan belajar bom dari media sosial.</li>
+          <li>Jangan eksperimen bahan berbahaya.</li>
+          <li>Jangan mencemari udara dan tanah.</li>
+          <li>Laporkan aktivitas mencurigakan kepada pihak berwenang.</li>
+        </ul>
+      </div>
+    </aside>
   </div>
 
   <div class="footer">
-    ETS Big Data &amp; Data Lakehouse &middot; Auto-refresh setiap 30 detik
+    Sistem Pemantauan Kualitas Udara Jawa Timur &middot; Informasi diperbarui otomatis setiap 30 detik
     <span id="last-refresh" class="tiny footer-refresh"></span>
   </div>
 
   <script>
+    const DEBUG_MODE = document.body.dataset.debugMode === 'true';
+
     function esc(s) {
       if (s === undefined || s === null) return '';
       const t = String(s);
@@ -94,19 +199,19 @@
     function getChartTheme() {
       if (isDarkTheme()) {
         return {
-          barBg: 'rgba(88, 166, 255, 0.75)',
-          barBorder: 'rgba(121, 192, 255, 1)',
-          grid: 'rgba(240, 246, 252, 0.12)',
-          tick: '#8b949e',
-          title: '#e6edf3',
+          barBg: 'rgba(246, 195, 67, 0.78)',
+          barBorder: 'rgba(255, 232, 153, 1)',
+          grid: 'rgba(246, 195, 67, 0.18)',
+          tick: '#e8dba8',
+          title: '#fff7cc',
         };
       }
       return {
-        barBg: 'rgba(15, 76, 129, 0.85)',
-        barBorder: 'rgba(10, 50, 86, 1)',
-        grid: 'rgba(0, 0, 0, 0.08)',
-        tick: '#37474f',
-        title: '#263238',
+        barBg: 'rgba(0, 63, 136, 0.86)',
+        barBorder: 'rgba(31, 41, 55, 1)',
+        grid: 'rgba(31, 41, 55, 0.18)',
+        tick: '#1f2937',
+        title: '#111827',
       };
     }
 
@@ -154,17 +259,29 @@
       const el = document.getElementById('spark-panel');
       const g = document.getElementById('spark-generated');
       if (!spark || typeof spark !== 'object') {
-        el.innerHTML = '<p class="err">Tidak ada data Spark.</p>';
+        el.innerHTML = '<p class="err">Belum ada ringkasan kondisi udara.</p>';
         return;
       }
       g.textContent = spark.generated_at
         ? 'Diperbarui: ' + esc(spark.generated_at)
         : '';
-      if (spark._demo) g.textContent += ' (contoh bawaan &mdash; jalankan notebook setelah ada data HDFS)';
+      if (DEBUG_MODE && spark._demo) g.textContent += ' (contoh bawaan &mdash; jalankan notebook setelah ada data HDFS)';
 
       const a1 = spark.analysis1 || {};
       const a2 = spark.analysis2 || {};
       const a3 = spark.analysis3 || {};
+      const title1 = DEBUG_MODE ? (a1.title || 'Analisis 1') : 'Sebaran kategori kualitas udara';
+      const title2 = DEBUG_MODE ? (a2.title || 'Analisis 2') : 'Rata-rata kualitas udara';
+      const title3 = DEBUG_MODE ? (a3.title || 'Analisis 3') : 'Urutan kota yang perlu perhatian';
+      const desc1 = DEBUG_MODE
+        ? (a1.interpretation || '')
+        : 'Menunjukkan perbandingan kondisi udara baik, sedang, tidak sehat, dan berbahaya di tiap kota.';
+      const desc2 = DEBUG_MODE
+        ? (a2.interpretation || '')
+        : 'Menunjukkan gambaran jam atau periode ketika kualitas udara cenderung lebih tinggi.';
+      const desc3 = DEBUG_MODE
+        ? (a3.interpretation || '')
+        : 'Menunjukkan kota yang perlu mendapat perhatian lebih berdasarkan rata-rata kualitas udara.';
 
       const rows1 = (a1.rows || []).map(
         (r) => `<tr>
@@ -186,23 +303,23 @@
 
       el.innerHTML = `
         <div class="spark-block">
-          <strong>${esc(a1.title || 'Analisis 1')}</strong>
-          <p class="interpret">${esc(a1.interpretation || '')}</p>
+          <strong>${esc(title1)}</strong>
+          <p class="interpret">${esc(desc1)}</p>
           <table class="aqi-table">
             <thead><tr><th>Kota</th><th>Baik %</th><th>Sedang %</th><th>T. Sehat %</th><th>Berbahaya %</th></tr></thead>
-            <tbody>${rows1 || '<tr><td colspan="5">Tidak ada baris (isi dari Spark)</td></tr>'}</tbody>
+            <tbody>${rows1 || '<tr><td colspan="5">Belum ada data ringkasan</td></tr>'}</tbody>
           </table>
         </div>
         <div class="spark-block">
-          <strong>${esc(a2.title || 'Analisis 2')}</strong>
-          <p class="interpret">${esc(a2.interpretation || '')}</p>
+          <strong>${esc(title2)}</strong>
+          <p class="interpret">${esc(desc2)}</p>
         </div>
         <div class="spark-block">
-          <strong>${esc(a3.title || 'Analisis 3')}</strong>
-          <p class="interpret">${esc(a3.interpretation || '')}</p>
+          <strong>${esc(title3)}</strong>
+          <p class="interpret">${esc(desc3)}</p>
           <table class="aqi-table">
-            <thead><tr><th>Kota</th><th>Rata AQI</th><th>Event &ge; &ldquo;Tidak Sehat&rdquo;</th></tr></thead>
-            <tbody>${rows3 || '<tr><td colspan="3">Tidak ada baris (isi dari Spark)</td></tr>'}</tbody>
+            <thead><tr><th>Kota</th><th>Rata-rata nilai</th><th>Kejadian &ge; &ldquo;Tidak Sehat&rdquo;</th></tr></thead>
+            <tbody>${rows3 || '<tr><td colspan="3">Belum ada data ringkasan</td></tr>'}</tbody>
           </table>
         </div>
       `;
@@ -218,7 +335,7 @@
         data: {
           labels,
           datasets: [{
-            label: 'Rata-rata AQI (contoh / Spark)',
+            label: 'Rata-rata kualitas udara',
             data: values,
             backgroundColor: th.barBg,
             borderColor: th.barBorder,
@@ -241,7 +358,7 @@
               beginAtZero: true,
               grid: { lineWidth: 1, color: th.grid },
               ticks: { color: th.tick },
-              title: { display: true, text: 'AQI', color: th.title },
+              title: { display: true, text: 'Nilai kualitas udara', color: th.title },
             },
             x: {
               grid: { display: true, lineWidth: 1, color: th.grid },
@@ -277,11 +394,11 @@
       el.innerHTML = `
         <table class="aqi-table">
           <thead>
-            <tr><th>Kota</th><th>AQI</th><th>Kategori</th><th>Diperbarui</th></tr>
+            <tr><th>Kota</th><th>Nilai</th><th>Kategori</th><th>Diperbarui</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
-        ${data.is_demo ? '<p class="tiny demo-note">Data contoh &mdash; consumer akan menimpa <code>live_api.json</code>.</p>' : ''}
+        ${(DEBUG_MODE && data.is_demo) ? '<p class="tiny demo-note">Data contoh &mdash; consumer akan menimpa <code>live_api.json</code>.</p>' : ''}
       `;
     }
 
@@ -302,7 +419,7 @@
             </li>
           `).join('')}
         </ul>
-        ${data.is_demo ? '<p class="tiny">Contoh &mdash; consumer RSS akan menimpa <code>live_rss.json</code>.</p>' : ''}
+        ${(DEBUG_MODE && data.is_demo) ? '<p class="tiny">Contoh &mdash; consumer RSS akan menimpa <code>live_rss.json</code>.</p>' : ''}
       `;
     }
 
@@ -311,7 +428,7 @@
         const res = await fetch('/api/data');
         const j = await res.json();
         document.getElementById('last-refresh').textContent =
-          'Terakhir fetch: ' + (j.refreshed_at || new Date().toISOString());
+          'Terakhir diperbarui: ' + (j.refreshed_at || new Date().toISOString());
 
         const demoBar = document.getElementById('demo-bar');
         const sparkDemo = !!(j.spark && j.spark._demo);
@@ -319,20 +436,20 @@
         const rssDemo = !!(j.rss && j.rss.is_demo);
         const allDemo = sparkDemo && apiDemo && rssDemo;
         const someDemo = sparkDemo || apiDemo || rssDemo;
-        if (allDemo) {
+        if (DEBUG_MODE && demoBar && allDemo) {
           demoBar.className = 'badge-bar show demo';
           demoBar.textContent =
-            'Mode demo penuh: belum ada salinan JSON. Jalankan consumer & Spark agar data nyata menggantikan contoh.';
-        } else if (someDemo) {
+            '[DEBUG] Mode demo penuh: belum ada salinan data. Jalankan proses pengambilan dan pengolahan data agar contoh diganti data nyata.';
+        } else if (DEBUG_MODE && demoBar && someDemo) {
           const pending = [];
           if (sparkDemo) pending.push('Spark');
           if (apiDemo) pending.push('AQI live');
           if (rssDemo) pending.push('Berita RSS');
           demoBar.className = 'badge-bar show partial';
           demoBar.textContent =
-            'Pipeline live ✓ — masih menunggu data: ' + pending.join(', ') +
+            '[DEBUG] Proses utama berjalan — masih menunggu data: ' + pending.join(', ') +
             ' (panel lain sudah menampilkan data nyata).';
-        } else {
+        } else if (demoBar) {
           demoBar.className = 'badge-bar';
           demoBar.textContent = '';
         }
@@ -343,7 +460,7 @@
       } catch (e) {
         console.error(e);
         document.getElementById('api-panel').innerHTML =
-          '<p class="err">Gagal memuat <code>/api/data</code>. Pastikan <code>python dashboard/app.py</code> berjalan.</p>';
+          '<p class="err">Gagal memuat data dashboard. Pastikan aplikasi dashboard sedang berjalan.</p>';
       }
     }
 

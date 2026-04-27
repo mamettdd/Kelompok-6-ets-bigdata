@@ -1,15 +1,4 @@
-"""
-Producer Kafka untuk berita lingkungan dari RSS (Topic: airquality-rss).
 
-Persyaratan rubrik soal:
-  [x] Polling tiap 5 menit (POLL_INTERVAL_SEC = 300)
-  [x] Parse pakai feedparser
-  [x] Field: title, link, summary, published
-  [x] Hindari duplikat: simpan ID yang sudah dikirim ke seen_ids.json
-  [x] Format JSON konsisten dengan field timestamp
-  [x] Producer pakai acks="all" + retries (Python equivalent enable_idempotence)
-  [x] Send dengan key = MD5 hash URL artikel
-"""
 from __future__ import annotations
 
 import hashlib
@@ -56,16 +45,19 @@ DEFAULT_FEEDS = [
 RSS_FEEDS = [u.strip() for u in os.environ.get("RSS_FEEDS", "").split(",") if u.strip()] or DEFAULT_FEEDS
 
 ENV_KEYWORDS = [
-    "polusi", "udara", "lingkungan", "aqi", "emisi", "asap", "kabut",
-    "pencemaran", "iklim", "cuaca", "pm2.5", "pm10", "karhutla",
-    "hutan", "limbah", "sampah", "banjir", "asma", "ispa",
+    "polusi", "udara", "kualitas udara", "lingkungan", "aqi", "emisi", "asap", "kabut",
+    "pencemaran", "pm2.5", "pm10", "karhutla", "kebakaran hutan", "kebakaran lahan",
+    "hutan", "limbah", "asma", "ispa", "paru-paru", "pernapasan", "napas",
+    "rokok", "perokok", "merokok", "asap rokok", "vape", "vaping", "rokok elektrik",
+    "one push", "one push vape", "baygon", "insektisida", "aerosol", "racun serangga",
+    "nuklir", "radiasi", "radioaktif", "reaktor", "limbah nuklir",
 ]
 RSS_KEYWORDS = [
     k.strip().lower()
     for k in os.environ.get("RSS_KEYWORDS", ",".join(ENV_KEYWORDS)).split(",")
     if k.strip()
 ]
-RSS_FALLBACK_TOPN = int(os.environ.get("RSS_FALLBACK_TOPN", "5"))
+RSS_FALLBACK_TOPN = int(os.environ.get("RSS_FALLBACK_TOPN", "0"))
 RSS_USER_AGENT = os.environ.get(
     "RSS_USER_AGENT",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 KafkaRSS/1.0",
@@ -215,12 +207,15 @@ def main() -> int:
             if relevant:
                 to_send = relevant
                 log.info("  → %d entry baru relevan (filter keyword).", len(to_send))
-            elif built:
+            elif built and RSS_FALLBACK_TOPN > 0:
                 to_send = built[:RSS_FALLBACK_TOPN]
                 log.info(
                     "  → tidak ada yang lolos filter keyword; fallback %d entry top untuk demo.",
                     len(to_send),
                 )
+            elif built:
+                to_send = []
+                log.info("  → tidak ada berita yang cocok keyword kualitas udara; tidak mengirim fallback umum.")
             else:
                 to_send = []
 

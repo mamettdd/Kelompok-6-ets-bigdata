@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 app = Flask(__name__)
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -56,12 +56,26 @@ DEMO_LIVE_API: List[Dict[str, Any]] = [
 
 DEMO_LIVE_RSS: List[Dict[str, Any]] = [
     {
-        "title": "Contoh: Polusi di Jawa Timur Meningkat (demo)",
+        "title": "Contoh: Asap rokok dan polusi udara perlu diwaspadai",
         "link": "https://www.tempo.co",
-        "summary": "Aktifkan producer RSS agar data berita tampil di sini.",
+        "summary": "Paparan asap rokok, emisi kendaraan, dan polusi udara dapat memengaruhi kesehatan pernapasan masyarakat.",
         "published": "2026-04-27",
         "timestamp_ingest": "2026-04-27T10:00:00+00:00",
-    }
+    },
+    {
+        "title": "Contoh: Aerosol dan obat serangga perlu digunakan dengan bijak",
+        "link": "https://www.kompas.com",
+        "summary": "Produk aerosol seperti obat serangga dapat memengaruhi kualitas udara dalam ruangan bila digunakan berlebihan.",
+        "published": "2026-04-27",
+        "timestamp_ingest": "2026-04-27T10:00:00+00:00",
+    },
+    {
+        "title": "Contoh: Isu nuklir dan radiasi perlu pengawasan ketat",
+        "link": "https://www.detik.com",
+        "summary": "Aktivitas berisiko tinggi seperti radiasi dan limbah nuklir perlu pengawasan karena dapat berdampak pada manusia dan lingkungan.",
+        "published": "2026-04-27",
+        "timestamp_ingest": "2026-04-27T10:00:00+00:00",
+    },
 ]
 
 DEMO_SPARK: Dict[str, Any] = {
@@ -276,7 +290,23 @@ def index():
         "index.html",
         kelompok=6,
         body_class="dashboard dashboard--sharp",
+        debug_mode=False,
     )
+
+
+@app.route("/debug")
+def debug_dashboard():
+    return render_template(
+        "index.html",
+        kelompok=6,
+        body_class="dashboard dashboard--sharp",
+        debug_mode=True,
+    )
+
+
+@app.route("/dashboard-assets/<path:filename>")
+def dashboard_asset(filename: str):
+    return send_from_directory(os.path.dirname(__file__), filename)
 
 
 @app.route("/api/data")

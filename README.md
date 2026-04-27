@@ -1,408 +1,1386 @@
-# AirQuality Alert: Monitoring Jawa Timur
+# AirQuality Alert: Monitoring Kualitas Udara Jawa Timur
 
-**ETS Big Data & Data Lakehouse — Kelompok 6**
+ETS Big Data & Data Lakehouse - Kelompok 6
 
-Pipeline data end-to-end yang mengintegrasikan **Apache Kafka**, **Hadoop HDFS**, dan **Apache Spark** untuk memantau kualitas udara di kawasan Gerbangkertasusila (Surabaya, Sidoarjo, Gresik, Mojokerto, Malang) secara real-time, lengkap dengan dashboard monitoring berbasis Flask.
-
-**Skrip presentasi & demonstrasi (materi digabung dari README + arsitektur + peta alamat; bilingual: teknis lalu ringkasan eksekutif):** [`README-PRESENTASI-DEMO.md`](./README-PRESENTASI-DEMO.md)
-
----
-
-## Anggota Kelompok
-
-| Nama | NRP | Kontribusi |
-|---|---|---|
-| Hansen Chang | 5027241028 | _diisi sesuai pembagian tim_ |
-| Ahmad Ibnu Athaillah | 5027241024 | _diisi sesuai pembagian tim_ |
-| Naila Raniyah Hanan | 5027241078 | _diisi sesuai pembagian tim_ |
-| Diva Aulia Rosa | 5027241003 | _diisi sesuai pembagian tim_ |
-| Ahmad Rabbani Fata | 5027241046 | _diisi sesuai pembagian tim_ |
+> **Fokus README**
+> README ini menjelaskan sistem, arsitektur, alur data, file, konfigurasi, cara jalan, validasi, troubleshooting, dan alasan desain.
+> Catatan pengerjaan, checklist fase, dan item kerja tetap berada di `CHECKLIST.md`.
 
 ---
 
-## Topik & Justifikasi
+## Daftar Isi
 
-Topik yang diangkat dalam proyek ini adalah **sistem pemantauan kualitas udara dan peringatan dini berbasis data real-time** untuk wilayah Jawa Timur. Pemilihan topik ini didasari oleh urgensi masalah polusi udara di kawasan padat penduduk dan industri seperti Surabaya, Sidoarjo, dan Gresik yang berdampak langsung pada kesehatan masyarakat. Hal yang membuat proyek ini menarik adalah penggabungan **data kuantitatif** dari API kualitas udara dengan **data kualitatif** dari berita RSS, sehingga sistem tidak hanya menyajikan angka tetapi juga memberikan konteks peristiwa di lapangan. Dengan mengimplementasikan arsitektur Data Lakehouse menggunakan Kafka, HDFS, dan Spark, proyek ini mendemonstrasikan bagaimana teknologi Big Data dapat memberikan solusi edukatif bagi masyarakat untuk menghindari paparan polusi pada jam-jam puncak berdasarkan hasil analisis historis.
-
-**Pertanyaan bisnis:** _"Pada jam berapa kualitas udara paling buruk, dan apakah berita lingkungan mencerminkan kondisi tersebut?"_
-
----
-
-## Arsitektur Sistem
-
-```
-                    ┌─────────────────┐    ┌─────────────────────────────┐
-                    │ AQICN /         │    │  RSS (Detik, Tempo, dll.)   │
-                    │  Simulator      │    │  — filter keyword lingkungan│
-                    └────────┬────────┘    └──────────────┬──────────────┘
-                             │ poll 15 mnt                 │ poll 5 mnt
-                             ▼                             ▼
-                    ┌─────────────────┐    ┌─────────────────┐
-                    │  producer_api.py│    │  producer_rss.py│
-                    └────────┬────────┘    └────────┬────────┘
-                             │                      │
-                             ▼                      ▼
-                  ┌──────────────────────────────────────────┐
-                  │              Apache Kafka                 │
-                  │  topic: airquality-api                    │
-                  │  topic: airquality-rss                    │
-                  └────────────────────┬─────────────────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │ consumer_to_hdfs.py  │  threading 2 topic
-                            └──────────┬───────────┘  + buffer + mirror
-                                       │
-                                       ▼
-                  ┌──────────────────────────────────────────┐
-                  │              Hadoop HDFS (replikasi 2)     │
-                  │  /data/airquality/api/                     │
-                  │  /data/airquality/rss/                    │
-                  │  /data/airquality/hasil/  ← output Spark  │
-                  └────────────────────┬───────────────────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │   Apache Spark        │  3 analisis wajib
-                            │   analysis.ipynb     │  + Spark SQL
-                            └──────────┬───────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │   Flask Dashboard    │  http://localhost:5000
-                            │   Chart.js, AQI 4   │  auto-refresh 30 s
-                            └──────────────────────┘
-```
+- Ringkasan Cepat
+- Latar Belakang
+- Tujuan dan Pertanyaan Bisnis
+- Arsitektur Utama
+- Alur Data Lengkap
+- Struktur Repository
+- Komponen Infrastruktur
+- Pipeline Kafka
+- Penyimpanan HDFS
+- Analisis Spark
+- Dashboard Flask
+- Konfigurasi Environment
+- Cara Menjalankan
+- Verifikasi
+- Troubleshooting
+- Argumentasi Desain
+- Batasan dan Rekomendasi
+- Glosarium
+- Lampiran Rinci
+- Kesimpulan
 
 ---
 
-## Panduan demonstrasi (ETS)
+## Ringkasan Cepat
 
-Dokumentasi ini dirancang agar dosen/audience bisa mengikuti alur **Kafka → HDFS → Spark → Dashboard** dalam satu sesi demo (~20–30 menit, atau dipersingkat dengan konfigurasi di bawah).
+Proyek ini adalah pipeline Big Data untuk memantau kualitas udara beberapa kota di Jawa Timur.
 
-### Ringkasan alur demonstrasi
+| Bagian | Teknologi | Peran |
+| --- | --- | --- |
+| Ingest AQI | `producer_api.py` | Mengambil data AQI dari AQICN atau simulator. |
+| Ingest RSS | `producer_rss.py` | Mengambil berita dari RSS dan melakukan deduplikasi. |
+| Message broker | Apache Kafka | Menjadi antrian data untuk API dan RSS. |
+| Storage | Hadoop HDFS | Menyimpan data historis dalam file batch. |
+| Analytics | Apache Spark | Menghitung distribusi kategori, rata-rata per jam, dan ranking kota. |
+| Presentation | Flask + Chart.js | Menampilkan data live dan hasil analisis dalam dashboard. |
 
-| Urutan | Komponen | Yang ditunjukkan |
-|--------|----------|------------------|
-| 1 | Docker | Stack Hadoop (1 NameNode, 3 DataNode, YARN) + Zookeeper + Kafka jalan |
-| 2 | Producer API | Pesan JSON AQI 5 kota ke topic `airquality-api` |
-| 3 | Producer RSS | Berita ke topic `airquality-rss` (dedup, key hash URL) |
-| 4 | Consumer | Buffer → flush ke HDFS + mirror `dashboard/data/live_*.json` |
-| 5 | HDFS | File `.json` di `/data/airquality/api/` dan `/.../rss/` |
-| 6 | Spark | Notebook: 3 analisis → `spark_results.json` + parquet di `hasil/` |
-| 7 | Dashboard | Panel live AQI, berita, grafik + tabel hasil Spark |
+**Teknis:** Alur utama adalah `AQICN/RSS -> Producer -> Kafka -> Consumer -> HDFS -> Spark -> Dashboard`.
 
-### Checklist sebelum demo
+**Maksud sederhana:** Data diambil, diantrikan, disimpan, dihitung, lalu ditampilkan.
 
-- [ ] `docker` dan `docker compose` bisa dijalankan; user login ada di grup `docker` (lihat *Troubleshooting* jika `permission denied` ke socket).
-- [ ] Python 3.9+ + venv: `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
-- [ ] File `.env` sudah disalin dari `.env.example` dan `AQICN_TOKEN` diisi (opsional; tanpa token pakai simulator).
-- [ ] Port bebas: `5000` (Flask), `9092` (Kafka), `9870/9000/8088` (Hadoop).
+## Latar Belakang
 
-### Opsi A — Satu perintah (stack + init + pipeline + dashboard)
+### Kualitas udara berubah menurut waktu
 
-Dari root repo:
+**Teknis:** AQI adalah data time-series karena nilainya berubah dari waktu ke waktu.
 
-```bash
-bash scripts/run-all.sh
+**Maksud sederhana:** Kondisi udara pagi, siang, dan malam bisa berbeda.
+
+### Kualitas udara berbeda antar kota
+
+**Teknis:** Surabaya, Sidoarjo, Gresik, Mojokerto, dan Malang memiliki karakter aktivitas berbeda.
+
+**Maksud sederhana:** Setiap kota punya risiko dan pola kualitas udara sendiri.
+
+### Data angka butuh konteks
+
+**Teknis:** AQI memberi angka, sedangkan RSS memberi konteks berita lingkungan.
+
+**Maksud sederhana:** Pengguna tidak hanya melihat angka, tetapi juga konteks kejadian.
+
+### Big Data cocok untuk pola historis
+
+**Teknis:** Data disimpan di HDFS agar bisa dianalisis ulang oleh Spark.
+
+**Maksud sederhana:** Data lama tetap berguna untuk menemukan pola.
+
+### Dashboard memudahkan konsumsi informasi
+
+**Teknis:** Flask menyajikan ringkasan dalam bentuk API dan halaman web.
+
+**Maksud sederhana:** Hasil analisis bisa dibaca tanpa membuka notebook atau terminal.
+
+## Tujuan dan Pertanyaan Bisnis
+
+| Pertanyaan | Jawaban Teknis | Maksud Sederhana |
+| --- | --- | --- |
+| Jam berapa kualitas udara paling buruk? | Spark SQL menghitung rata-rata AQI per kota per jam. | Menemukan jam rawan polusi. |
+| Kota mana yang kualitas udaranya paling buruk? | Spark membuat ranking berdasarkan rata-rata AQI. | Menentukan kota prioritas perhatian. |
+| Seberapa sering kota masuk kategori buruk? | Spark menghitung distribusi kategori AQI per kota. | Melihat seberapa sering udara tidak sehat. |
+| Apa konteks beritanya? | Producer RSS mengirim berita ke Kafka dan HDFS. | Menampilkan berita lingkungan terkait. |
+| Bagaimana semua komponen tersambung? | README ini memetakan producer, Kafka, HDFS, Spark, dan Flask. | Pembaca bisa mengikuti alur dari sumber data sampai dashboard. |
+
+## Arsitektur Utama
+
+```text
++----------------------+       +----------------------+
+| AQICN API            |       | RSS Feeds            |
+| atau Simulator       |       | Detik/Tempo/Kompas   |
++----------+-----------+       +----------+-----------+
+           |                              |
+           v                              v
++----------------------+       +----------------------+
+| producer_api.py      |       | producer_rss.py      |
+| key = city_slug      |       | key = md5(link)      |
++----------+-----------+       +----------+-----------+
+           |                              |
+           +--------------+---------------+
+                          v
++------------------------------------------------------+
+| Apache Kafka                                         |
+| topic: airquality-api                                |
+| topic: airquality-rss                                |
++-------------------------+----------------------------+
+                          |
+                          v
++------------------------------------------------------+
+| consumer_to_hdfs.py                                 |
+| dua thread, buffer, flush HDFS, mirror dashboard     |
++-------------------------+----------------------------+
+                          |
+          +---------------+---------------+
+          |                               |
+          v                               v
++-------------------------+     +------------------------+
+| HDFS                    |     | dashboard/data JSON    |
+| api, rss, hasil         |     | live_api, live_rss     |
++------------+------------+     +-----------+------------+
+             |                              |
+             v                              v
++-------------------------+     +------------------------+
+| spark/analysis.ipynb    |     | dashboard/app.py       |
+| tiga analisis utama     |     | Flask API + HTML       |
++------------+------------+     +-----------+------------+
+             |                              |
+             +---------------+--------------+
+                             v
+                       Browser pengguna
 ```
 
-Script ini: menaikkan stack Docker, menunggu layanan, init topic + folder HDFS, menjalankan producer API & RSS, consumer, lalu **dashboard di foreground** di `http://127.0.0.1:5000` (port bisa di-override: `PORT=5001 bash scripts/run-all.sh`).
+**Teknis:** Arsitektur memisahkan ingestion, broker, storage, analytics, dan presentation.
 
-Di terminal **lain** (untuk verifikasi saat juri bertanya):
+**Maksud sederhana:** Setiap bagian punya tugas sendiri sehingga sistem mudah dipahami dan diuji.
 
-```bash
-docker ps --format 'table {{.Names}}\t{{.Status}}'
-docker exec namenode hdfs dfs -ls -R /data/airquality/ | head -40
-tail -f logs/consumer.log
-```
+## Alur Data Lengkap
 
-Stop pipeline (process Python, stack tetap jalan): `bash scripts/stop-pipeline.sh`  
-Stop stack: `bash scripts/stop-stack.sh` (tambah `--volumes` untuk reset data HDFS lokal)
+### 1. Producer API membaca data
 
-### Opsi B — Step-by-step (cocok untuk penjelasan di depan kelas)
+**Teknis:** `producer_api.py` membaca AQICN atau simulator untuk lima kota.
 
-1. **Infrastruktur**
+**Maksud sederhana:** Data kualitas udara masuk ke sistem.
 
-   ```bash
-   bash scripts/start-stack.sh
-   # tunggu ~30–60 detik
-   bash scripts/init-infra.sh
-   bash scripts/sanity-check.sh
-   ```
+### 2. Producer RSS membaca berita
 
-2. **Pipeline (background)**
+**Teknis:** `producer_rss.py` membaca feed RSS, filter keyword, dan dedup link.
 
-   ```bash
-   bash scripts/run-producers.sh
-   bash scripts/run-consumer.sh
-   ```
+**Maksud sederhana:** Berita terbaru masuk sebagai konteks.
 
-3. **Pantau log (opsional)**
+### 3. Kafka menyimpan message
 
-   ```bash
-   tail -f logs/producer_api.log
-   # terminal lain: tail -f logs/producer_rss.log
-   # terminal lain: tail -f logs/consumer.log
-   ```
+**Teknis:** Kafka menyimpan event API dan RSS di dua topic terpisah.
 
-4. **Verifikasi HDFS** — pastikan muncul baris `FLUSH` di `consumer.log` dan file di HDFS:
+**Maksud sederhana:** Data menunggu di antrian.
 
-   ```bash
-   docker exec namenode hdfs dfs -ls /data/airquality/api/
-   docker exec namenode hdfs dfs -ls /data/airquality/rss/
-   ```
+### 4. Consumer membaca Kafka
 
-5. **Dashboard**
+**Teknis:** `consumer_to_hdfs.py` membaca dua topic dengan dua thread.
 
-   ```bash
-   bash scripts/run-dashboard.sh
-   ```
+**Maksud sederhana:** Dua aliran diproses paralel.
 
-   Buka browser: [http://127.0.0.1:5000](http://127.0.0.1:5000)
+### 5. Consumer menulis HDFS
 
-6. **Spark (setelah data cukup di HDFS, minimal beberapa flush)**
+**Teknis:** Data di-buffer lalu ditulis ke HDFS sebagai NDJSON.
 
-   Buka `spark/analysis.ipynb` di Jupyter, **Run All**, atau eksekusi headless (lihat *Spark di WSL2/Linux* di bawah).
+**Maksud sederhana:** Data menjadi arsip historis.
 
-### Konfigurasi `.env` untuk demo lebih cepat
+### 6. Consumer membuat mirror
 
-Untuk ujian/demo singkat, perkecil interval buffer consumer agar file mirror dan HDFS terisi tanpa menunggu 3 menit:
+**Teknis:** Snapshot terbaru ditulis ke `dashboard/data/live_*.json`.
 
-```bash
-# Consumer: flush tiap 10 detik (atau setelah cukup record)
-BUFFER_FLUSH_SEC=10
-BUFFER_MAX_RECORDS=200
-```
+**Maksud sederhana:** Dashboard punya data cepat dibaca.
 
-Pastikan hanya **satu** baris `BUFFER_FLUSH_SEC` aktif (hindari duplikat di file).
+### 7. Spark membaca HDFS
 
-**RSS — paste ke `.env` (4 feed: 2 sumber penuh + 2 cadangan rubrik):**
+**Teknis:** Notebook membaca data API dari `/data/airquality/api/`.
 
-```bash
-RSS_FEEDS=https://news.detik.com/rss,https://rss.tempo.co/nasional,https://rss.tempo.co/tag/polusi,https://rss.kompas.com/feed/kompas.com/sains/environment
-RSS_KEYWORDS=polusi,udara,lingkungan,aqi,emisi,asap,kabut,pencemaran,iklim,cuaca,pm2.5,pm10,karhutla,hutan,limbah,sampah,banjir,asma,ispa
-RSS_FALLBACK_TOPN=5
-```
+**Maksud sederhana:** Data historis dihitung.
 
-> Catatan: feed rubrik lama (mis. Tempo `/tag/polusi`) sering 0 entri; Detik + Tempo nasional memastikan data masuk. Setelah edit `.env`, restart producer RSS: `pkill -f kafka/producer_rss.py` lalu `bash scripts/run-producers.sh`.
+### 8. Spark menulis hasil
 
-### Verifikasi cepat: pipeline “hidup”
+**Teknis:** Hasil analisis ditulis ke HDFS dan `spark_results.json`.
 
-- **Log consumer** mengandung `FLUSH` untuk API dan RSS.
-- **File lokal** (mirror untuk dashboard):
-  - `dashboard/data/live_api.json` — 5 baris kota terakhir
-  - `dashboard/data/live_rss.json` — daftar berita
-- **API dashboard:** `curl -s http://127.0.0.1:5000/api/data | python3 -m json.tool` — cek `api.is_demo` dan `rss.is_demo` jadi `false` setelah data ada; `spark._demo` menjadi `false` setelah Spark menulis `spark_results.json`.
+**Maksud sederhana:** Insight siap ditampilkan.
 
-### Apa yang ditampilkan di layar (untuk juri)
+### 9. Flask menyajikan dashboard
 
-1. **HDFS Web UI** — [http://localhost:9870](http://localhost:9870) → Browse Directory → `/data/airquality/`
-2. **YARN** — [http://localhost:8088](http://localhost:8088) (jika job Spark di-submit ke cluster; notebook lokal sering hanya `local[*]`)
-3. **Terminal** — `docker ps` menunjuk **8 container** (6 Hadoop + Zookeeper + Kafka) sesuai compose
-4. **Dashboard** — legenda 4 warna AQI, tabel live, berita, chart dari Spark
-5. **Jupyter/Notebook** — tiga blok analisis + interpretasi
+**Teknis:** Flask membaca JSON lokal dan menyajikan `/api/data`.
 
-### Screenshot (disarankan)
-
-| Screenshot | Kapan diambil |
-|------------|----------------|
-| HDFS: isi folder `/data/airquality/api` dan `rss` | Setelah `FLUSH` terlihat di log |
-| `docker ps` 8 service | Saat semua *healthy* / running |
-| Dashboard penuh | Setelah `live_*.json` + `spark_results.json` terisi |
-| Satu cell output Spark (analisis 1 atau 2) | Setelah Run All `analysis.ipynb` |
-| (Opsional) Kafka: consume sekali | `docker exec -it kafka-broker kafka-console-consumer ...` |
-
-Ganti tabel *TODO* lama jika semua gambar sudah disisipkan ke repo (`docs/screenshots/` disarankan).
-
----
-
-## Prasyarat Sistem
-
-| Tools | Catatan | Cek |
-|-------|---------|-----|
-| Docker Engine | 20+ | `docker --version` |
-| Docker Compose | v2+ | `docker compose version` |
-| Python | 3.9+ (3.12 OK) | `python3 --version` |
-| Java (JDK) | Untuk PySpark, biasanya 8–21; **Spark 3.5 + Java 17/21** sering butuh flag `--add-opens` (lihat notebook / eksekusi headless) | `java -version` |
-| Git | 2.x | `git --version` |
-
-> **WSL2/Linux — Docker belum terpasang:** `bash scripts/install-docker-wsl.sh`  
-> **User harus grup `docker`:** setelah `sudo usermod -aG docker $USER`, **logout/login** atau `newgrp docker` agar `docker ps` jalan tanpa `sudo`.
-
----
-
-## Cara menjalankan (referensi teknis)
-
-### Clone & setup Python
-
-```bash
-git clone https://github.com/mamettdd/Kelompok-6-ets-bigdata.git
-cd Kelompok-6-ets-bigdata
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### Stack & inisialisasi
-
-```bash
-bash scripts/start-stack.sh
-# tunggu layanan ready
-bash scripts/init-infra.sh
-bash scripts/sanity-check.sh
-```
-
-### Konfigurasi
-
-```bash
-cp .env.example .env
-# Edit .env: AQICN_TOKEN=... (opsional)
-```
-
-### Producer & consumer (manual)
-
-```bash
-# Helper (background + log):
-bash scripts/run-producers.sh
-bash scripts/run-consumer.sh
-
-# Atau manual per proses:
-python kafka/producer_api.py
-python kafka/producer_rss.py
-python kafka/consumer_to_hdfs.py
-```
-
-### Spark (`analysis.ipynb`)
-
-- Baca data dari HDFS; di **WSL2** jika baca DataNode dari host bermasalah, notebook memakai **fallback** (list WebHDFS + `docker exec namenode hdfs dfs -cat` / strategi setara) sehingga data tetap dari cluster.
-- **SPARK_HOME:** pakai PySpark bawaan venv, misalnya:
-  - `export SPARK_HOME="$PWD/.venv/lib/python3.12/site-packages/pyspark"`
-- **Akses Docker** dari proses yang memanggil `docker exec` harus sama seperti user yang bisa `docker ps` (grup `docker`).
-- Setelah *Run All*, cek:
-  - `dashboard/data/spark_results.json`
-  - `hdfs:///data/airquality/hasil/*` (parquet)
-
-Contoh eksekusi headless (setelah set `JAVA_HOME`, `SPARK_HOME`, dan flag `--add-opens` seperti di variabel `PYSPARK_SUBMIT_ARGS` pada sesi interaktif):
-
-```bash
-# Pastikan: source .venv/bin/activate, grup docker aktif, lalu:
-jupyter nbconvert --to notebook --execute spark/analysis.ipynb --output analysis.ipynb
-```
-
-### Dashboard
-
-```bash
-bash scripts/run-dashboard.sh
-# http://127.0.0.1:5000/   |   API: /api/data
-# Paksa data contoh:       /api/data?demo=1
-```
-
-### Mematikan stack
-
-```bash
-bash scripts/stop-pipeline.sh   # hentikan proses Python pipeline
-bash scripts/stop-stack.sh      # hentikan container
-# Reset volume HDFS lokal:
-bash scripts/stop-stack.sh --volumes
-```
-
----
-
-## Web UI
-
-| Layanan | URL |
-|---------|-----|
-| HDFS NameNode | [http://localhost:9870](http://localhost:9870) |
-| DataNode (1–3) | [http://localhost:9864](http://localhost:9864) · [9865](http://localhost:9865) · [9866](http://localhost:9866) |
-| YARN ResourceManager | [http://localhost:8088](http://localhost:8088) |
-| Kafka | `localhost:9092` |
-
----
+**Maksud sederhana:** Pengguna melihat hasil di browser.
 
 ## Struktur Repository
 
+| Path | Fungsi | Catatan Baca |
+| --- | --- | --- |
+| `README.md` | Dokumentasi utama. | Fokus pada sistem, bukan progres. |
+| `CHECKLIST.md` | Checklist pengerjaan dan status. | Tempat catatan progres. |
+| `architecture.md` | Ringkasan arsitektur. | Versi pendek desain sistem. |
+| `address.md` | Peta path dan alamat. | Membantu navigasi repo. |
+| `requirements.txt` | Dependency Python. | Dipakai untuk setup venv. |
+| `.env.example` | Template environment. | Disalin menjadi `.env`. |
+| `.gitignore` | Aturan file yang tidak di-commit. | Melindungi secrets dan runtime output. |
+| `docker-compose-kafka.yml` | Kafka dan Zookeeper. | Stack message broker. |
+| `docker-compose-hadoop.yml` | Hadoop cluster lokal. | Stack HDFS dan YARN. |
+| `hadoop.env` | Konfigurasi Hadoop. | Termasuk replikasi HDFS. |
+| `scripts/` | Script operasional. | Start, stop, init, run, check. |
+| `kafka/` | Producer dan consumer. | Logika ingestion dan sink. |
+| `spark/` | Notebook analisis. | Logika agregasi data. |
+| `dashboard/` | Flask app dan frontend. | Layer presentasi. |
+
+## Komponen Infrastruktur
+
+### Zookeeper
+
+**Teknis:** Service `zookeeper` memakai image `wurstmeister/zookeeper` dan port `2181`.
+
+**Maksud sederhana:** Komponen pendukung Kafka.
+
+### Kafka broker
+
+**Teknis:** Service Kafka memakai container `kafka-broker` dengan port `9092` dan `29092`.
+
+**Maksud sederhana:** Server antrian utama.
+
+### NameNode
+
+**Teknis:** `namenode` membuka UI `9870` dan RPC `9000`.
+
+**Maksud sederhana:** Pusat metadata HDFS.
+
+### DataNode
+
+**Teknis:** `datanode1`, `datanode2`, dan `datanode3` menyimpan block HDFS.
+
+**Maksud sederhana:** Rak penyimpanan data.
+
+### ResourceManager
+
+**Teknis:** `resourcemanager` membuka UI YARN di `8088`.
+
+**Maksud sederhana:** Pengelola resource Hadoop.
+
+### NodeManager
+
+**Teknis:** `nodemanager` menjadi worker YARN.
+
+**Maksud sederhana:** Pekerja cluster.
+
+## Pipeline Kafka
+
+### Topic API
+
+**Teknis:** `airquality-api` berisi event AQI.
+
+**Maksud sederhana:** Saluran angka kualitas udara.
+
+### Topic RSS
+
+**Teknis:** `airquality-rss` berisi event berita.
+
+**Maksud sederhana:** Saluran konteks berita.
+
+### Kafka key API
+
+**Teknis:** Key memakai `city_slug`.
+
+**Maksud sederhana:** Setiap kota punya identitas.
+
+### Kafka key RSS
+
+**Teknis:** Key memakai MD5 dari link.
+
+**Maksud sederhana:** Setiap berita punya identitas.
+
+### Manual topic creation
+
+**Teknis:** `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`.
+
+**Maksud sederhana:** Topic dibuat sengaja, bukan otomatis.
+
+### Consumer group
+
+**Teknis:** API dan RSS memakai group berbeda.
+
+**Maksud sederhana:** Posisi baca dua aliran dipisah.
+
+## Penyimpanan HDFS
+
+### Path API
+
+**Teknis:** `/data/airquality/api/` menyimpan NDJSON AQI.
+
+**Maksud sederhana:** Arsip angka kualitas udara.
+
+### Path RSS
+
+**Teknis:** `/data/airquality/rss/` menyimpan NDJSON berita.
+
+**Maksud sederhana:** Arsip konteks berita.
+
+### Path hasil
+
+**Teknis:** `/data/airquality/hasil/` menyimpan output Spark.
+
+**Maksud sederhana:** Arsip hasil analisis.
+
+### Replikasi
+
+**Teknis:** `dfs.replication=2`.
+
+**Maksud sederhana:** Setiap block punya salinan.
+
+### Write mode
+
+**Teknis:** `docker_exec` menjadi default.
+
+**Maksud sederhana:** Lebih aman untuk WSL2.
+
+### Format
+
+**Teknis:** File batch memakai JSON per baris.
+
+**Maksud sederhana:** Mudah dibaca Spark.
+
+## Analisis Spark
+
+### Input
+
+**Teknis:** Spark membaca `/data/airquality/api/*.json`.
+
+**Maksud sederhana:** Bahan analisis adalah data historis.
+
+### Normalisasi waktu
+
+**Teknis:** `observed_at` diprioritaskan, lalu `timestamp_ingest`.
+
+**Maksud sederhana:** Pakai waktu terbaik yang tersedia.
+
+### Kategori AQI
+
+**Teknis:** AQI dipetakan ke Baik, Sedang, Tidak Sehat, Berbahaya.
+
+**Maksud sederhana:** Angka jadi label mudah dibaca.
+
+### Analisis 1
+
+**Teknis:** Distribusi kategori AQI per kota.
+
+**Maksud sederhana:** Melihat komposisi kondisi udara.
+
+### Analisis 2
+
+**Teknis:** Rata-rata AQI per kota per jam.
+
+**Maksud sederhana:** Menemukan jam rawan.
+
+### Analisis 3
+
+**Teknis:** Ranking kota berdasarkan rata-rata AQI dan event >100.
+
+**Maksud sederhana:** Menentukan prioritas kota.
+
+## Dashboard Flask
+
+### Route utama
+
+**Teknis:** `/` merender `index.html`.
+
+**Maksud sederhana:** Halaman dashboard.
+
+### API data
+
+**Teknis:** `/api/data` menggabungkan Spark, API, dan RSS.
+
+**Maksud sederhana:** Satu endpoint untuk browser.
+
+### API status
+
+**Teknis:** `/api/status` menjadi alias.
+
+**Maksud sederhana:** Kompatibilitas endpoint.
+
+### Fallback demo
+
+**Teknis:** Backend punya data contoh jika file belum ada.
+
+**Maksud sederhana:** Dashboard tetap bisa dibuka.
+
+### Auto refresh
+
+**Teknis:** Frontend fetch ulang setiap 30 detik.
+
+**Maksud sederhana:** Data diperbarui otomatis.
+
+### Theme
+
+**Teknis:** Tema light/dark disimpan di localStorage.
+
+**Maksud sederhana:** Tampilan nyaman dibaca lama.
+
+## Konfigurasi Environment
+
+### KAFKA_BOOTSTRAP
+
+**Teknis:** `KAFKA_BOOTSTRAP` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `KAFKA_BOOTSTRAP` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### KAFKA_TOPIC_API
+
+**Teknis:** `KAFKA_TOPIC_API` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `KAFKA_TOPIC_API` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### KAFKA_TOPIC_RSS
+
+**Teknis:** `KAFKA_TOPIC_RSS` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `KAFKA_TOPIC_RSS` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### AQICN_TOKEN
+
+**Teknis:** `AQICN_TOKEN` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `AQICN_TOKEN` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### FORCE_SIMULATOR
+
+**Teknis:** `FORCE_SIMULATOR` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `FORCE_SIMULATOR` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### POLL_INTERVAL_SEC
+
+**Teknis:** `POLL_INTERVAL_SEC` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `POLL_INTERVAL_SEC` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### HTTP_TIMEOUT_SEC
+
+**Teknis:** `HTTP_TIMEOUT_SEC` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `HTTP_TIMEOUT_SEC` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### POLL_INTERVAL_SEC_RSS
+
+**Teknis:** `POLL_INTERVAL_SEC_RSS` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `POLL_INTERVAL_SEC_RSS` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### RSS_FEEDS
+
+**Teknis:** `RSS_FEEDS` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `RSS_FEEDS` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### RSS_KEYWORDS
+
+**Teknis:** `RSS_KEYWORDS` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `RSS_KEYWORDS` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### RSS_FALLBACK_TOPN
+
+**Teknis:** `RSS_FALLBACK_TOPN` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `RSS_FALLBACK_TOPN` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### RSS_USER_AGENT
+
+**Teknis:** `RSS_USER_AGENT` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `RSS_USER_AGENT` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### RSS_SEEN_IDS_FILE
+
+**Teknis:** `RSS_SEEN_IDS_FILE` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `RSS_SEEN_IDS_FILE` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### RSS_MAX_SEEN_IDS
+
+**Teknis:** `RSS_MAX_SEEN_IDS` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `RSS_MAX_SEEN_IDS` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### HDFS_NAMENODE_URL
+
+**Teknis:** `HDFS_NAMENODE_URL` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `HDFS_NAMENODE_URL` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### HDFS_NAMENODE_RPC
+
+**Teknis:** `HDFS_NAMENODE_RPC` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `HDFS_NAMENODE_RPC` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### HDFS_USER
+
+**Teknis:** `HDFS_USER` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `HDFS_USER` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### HDFS_BASE_DIR
+
+**Teknis:** `HDFS_BASE_DIR` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `HDFS_BASE_DIR` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### HDFS_NAMENODE_CONTAINER
+
+**Teknis:** `HDFS_NAMENODE_CONTAINER` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `HDFS_NAMENODE_CONTAINER` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### HDFS_WRITE_MODE
+
+**Teknis:** `HDFS_WRITE_MODE` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `HDFS_WRITE_MODE` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### BUFFER_FLUSH_SEC
+
+**Teknis:** `BUFFER_FLUSH_SEC` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `BUFFER_FLUSH_SEC` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### BUFFER_MAX_RECORDS
+
+**Teknis:** `BUFFER_MAX_RECORDS` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `BUFFER_MAX_RECORDS` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### CONSUMER_GROUP_API
+
+**Teknis:** `CONSUMER_GROUP_API` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `CONSUMER_GROUP_API` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### CONSUMER_GROUP_RSS
+
+**Teknis:** `CONSUMER_GROUP_RSS` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `CONSUMER_GROUP_RSS` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### DASHBOARD_DATA_DIR
+
+**Teknis:** `DASHBOARD_DATA_DIR` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `DASHBOARD_DATA_DIR` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+### PORT
+
+**Teknis:** `PORT` mengubah perilaku runtime komponen terkait.
+
+**Maksud sederhana:** `PORT` adalah tuas konfigurasi agar proyek bisa menyesuaikan mesin dan kebutuhan demo.
+
+## Cara Menjalankan
+
+### Clone repository
+
+```bash
+git clone https://github.com/mamettdd/Kelompok-6-ets-bigdata.git
 ```
-Kelompok-6-ets-bigdata/
-├── README.md
-├── CHECKLIST.md
-├── requirements.txt
-├── docker-compose-hadoop.yml
-├── docker-compose-kafka.yml
-├── hadoop.env
-├── .env.example
-│
-├── scripts/
-│   ├── install-docker-wsl.sh
-│   ├── start-stack.sh
-│   ├── stop-stack.sh
-│   ├── init-infra.sh
-│   ├── sanity-check.sh
-│   ├── run-producers.sh
-│   ├── run-consumer.sh
-│   ├── run-dashboard.sh
-│   ├── run-all.sh
-│   └── stop-pipeline.sh
-│
-├── kafka/
-│   ├── producer_api.py
-│   ├── producer_rss.py
-│   └── consumer_to_hdfs.py
-│
-├── spark/
-│   └── analysis.ipynb
-│
-└── dashboard/
-    ├── app.py
-    ├── templates/index.html
-    ├── static/style.css
-    └── data/                    # live_api.json, live_rss.json, spark_results.json
+
+**Teknis:** Command `git clone https://github.com/mamettdd/Kelompok-6-ets-bigdata.git` menjalankan tahap clone repository.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Masuk folder proyek
+
+```bash
+cd Kelompok-6-ets-bigdata
 ```
 
----
+**Teknis:** Command `cd Kelompok-6-ets-bigdata` menjalankan tahap masuk folder proyek.
 
-## Troubleshooting (umum saat demonstrasi)
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
 
-| Gejala | Penyebab umum | Tindakan |
-|--------|----------------|----------|
-| `permission denied` ke `/var/run/docker.sock` | User belum di grup `docker` atau session lama | `newgrp docker` atau logout/login; `groups` harus memuat `docker` |
-| Consumer tidak menulis; error WebHDFS ke hostname aneh (container id) | Host tidak resolve nama DataNode (WSL2) | Pastikan `HDFS_WRITE_MODE=docker_exec` dan `HDFS_NAMENODE_CONTAINER=namenode` (default) |
-| `ModuleNotFoundError: kafka.vendor.six.moves` | `kafka-python` lama di Python 3.12 | Pakai `kafka-python-ng` (sudah di `requirements.txt`); `pip install -r requirements.txt` ulang |
-| Panel RSS kosong / producer RSS 0 entri | URL RSS rubrik deprek / 404 | Gunakan `RSS_FEEDS` dengan Detik + Tempo nasional (lihat bagian demo) |
-| Bar info “demo” di dashboard | `spark_results.json` belum ada, atau sisi lain masih contoh | Isi HDFS + jalankan Spark; cek `api.is_demo` / `rss.is_demo` di `/api/data` |
-| `FileNotFoundError: spark-submit` | `SPARK_HOME` menunjuk ke `/opt/spark` kosong | Set `SPARK_HOME` ke folder `pyspark` di dalam `.venv` (lihat bagian Spark) |
+### Buat virtual environment
 
----
+```bash
+python3 -m venv .venv
+```
 
-## Status implementasi
+**Teknis:** Command `python3 -m venv .venv` menjalankan tahap buat virtual environment.
 
-| Fase | Komponen | Status |
-|------|----------|--------|
-| 1 | Infrastruktur Docker (Kafka + Hadoop multi-DataNode, replikasi 2) | Selesai |
-| 2 | Producer (AQICN + simulator, RSS + dedup) | Selesai |
-| 3 | Consumer 2 topik, buffer, mirror dashboard | Selesai |
-| 4 | Spark: 3 analisis + SQL | Selesai |
-| 5 | Flask + Chart.js + AQI 4 kategori | Selesai |
-| 6 | Dokumentasi demo + refleksi + screenshot | Lengkapi di kelas |
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
 
-Detail checklist: [`CHECKLIST.md`](./CHECKLIST.md)
+### Aktifkan virtual environment
 
----
+```bash
+source .venv/bin/activate
+```
 
-## Tantangan & solusi (ringkas)
+**Teknis:** Command `source .venv/bin/activate` menjalankan tahap aktifkan virtual environment.
 
-- **WSL2 + HDFS:** client di host sering tidak bisa mengikuti redirect WebHDFS ke DataNode. Solusi: tulis/baca lewat `docker exec` di container NameNode, atau jaringan Docker yang sama.
-- **RSS berubah URL:** feed rubrik lama sering 404. Solusi: ganti sumber (Detik root, Tempo nasional) + filter keyword + fallback top-N.
-- **Konsistensi Python:** gunakan venv proyek dan `requirements.txt` yang sama di semua mesin demo.
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
 
----
+### Install dependency
+
+```bash
+pip install -r requirements.txt
+```
+
+**Teknis:** Command `pip install -r requirements.txt` menjalankan tahap install dependency.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Salin environment
+
+```bash
+cp .env.example .env
+```
+
+**Teknis:** Command `cp .env.example .env` menjalankan tahap salin environment.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Start stack
+
+```bash
+bash scripts/start-stack.sh
+```
+
+**Teknis:** Command `bash scripts/start-stack.sh` menjalankan tahap start stack.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Init infrastruktur
+
+```bash
+bash scripts/init-infra.sh
+```
+
+**Teknis:** Command `bash scripts/init-infra.sh` menjalankan tahap init infrastruktur.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Sanity check
+
+```bash
+bash scripts/sanity-check.sh
+```
+
+**Teknis:** Command `bash scripts/sanity-check.sh` menjalankan tahap sanity check.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Run producers
+
+```bash
+bash scripts/run-producers.sh
+```
+
+**Teknis:** Command `bash scripts/run-producers.sh` menjalankan tahap run producers.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Run consumer
+
+```bash
+bash scripts/run-consumer.sh
+```
+
+**Teknis:** Command `bash scripts/run-consumer.sh` menjalankan tahap run consumer.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Run Spark notebook
+
+```bash
+jupyter notebook spark/analysis.ipynb
+```
+
+**Teknis:** Command `jupyter notebook spark/analysis.ipynb` menjalankan tahap run spark notebook.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+### Run dashboard
+
+```bash
+bash scripts/run-dashboard.sh
+```
+
+**Teknis:** Command `bash scripts/run-dashboard.sh` menjalankan tahap run dashboard.
+
+**Maksud sederhana:** Tahap ini membawa proyek satu langkah lebih dekat ke dashboard berjalan.
+
+## Verifikasi
+
+### Cek container
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+```
+
+**Teknis:** docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+**Maksud sederhana:** Memastikan container hidup.
+
+### Cek topic Kafka
+
+```bash
+docker exec kafka-broker kafka-topics.sh --bootstrap-server localhost:9092 --list
+```
+
+**Teknis:** docker exec kafka-broker kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+**Maksud sederhana:** Memastikan saluran data ada.
+
+### Cek folder HDFS
+
+```bash
+docker exec namenode hdfs dfs -ls -R /data/airquality/
+```
+
+**Teknis:** docker exec namenode hdfs dfs -ls -R /data/airquality/
+
+**Maksud sederhana:** Memastikan gudang data siap.
+
+### Cek API dashboard
+
+```bash
+curl -s http://127.0.0.1:5000/api/data
+```
+
+**Teknis:** `curl -s http://127.0.0.1:5000/api/data`
+
+**Maksud sederhana:** Memastikan Flask memberi data.
+
+### Cek consumer group API
+
+```bash
+docker exec kafka-broker kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group airquality-consumer-api
+```
+
+**Teknis:** docker exec kafka-broker kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group airquality-consumer-api
+
+**Maksud sederhana:** Memastikan consumer API terlacak.
+
+## Troubleshooting
+
+| Gejala | Penyebab | Solusi |
+| --- | --- | --- |
+| Docker permission denied | User belum masuk grup `docker`. | Tambahkan user ke grup docker lalu login ulang. |
+| Kafka tidak connect | Container belum siap atau port belum terbuka. | Jalankan stack dan tunggu beberapa detik. |
+| Topic tidak ada | Init belum dijalankan. | Jalankan `bash scripts/init-infra.sh`. |
+| Consumer belum flush | Buffer belum mencapai batas waktu atau jumlah. | Turunkan `BUFFER_FLUSH_SEC` untuk demo. |
+| HDFS gagal via WebHDFS | Redirect hostname DataNode bermasalah di WSL2. | Gunakan `HDFS_WRITE_MODE=docker_exec`. |
+| Notebook error module hdfs | Kernel tidak memakai venv yang benar. | Install requirements dan pilih kernel venv. |
+| Dashboard masih demo | File JSON runtime belum tersedia. | Jalankan producer, consumer, dan Spark. |
+| RSS terlalu umum | Fallback Top-N aktif atau keyword terlalu longgar. | Atur `RSS_KEYWORDS` dan `RSS_FEEDS`. |
+
+## Argumentasi Desain
+
+### Mengapa Kafka?
+
+**Teknis:** Kafka memisahkan producer dan consumer menggunakan topic dan offset.
+
+**Maksud sederhana:** Pengambil data tidak terganggu jika penyimpan sedang lambat.
+
+### Mengapa HDFS?
+
+**Teknis:** HDFS menyimpan file historis dengan replikasi.
+
+**Maksud sederhana:** Data lama tetap aman sebagai arsip.
+
+### Mengapa Spark?
+
+**Teknis:** Spark cocok untuk agregasi historis dan SQL.
+
+**Maksud sederhana:** Data mentah berubah menjadi insight.
+
+### Mengapa Flask?
+
+**Teknis:** Flask cukup ringan untuk API dan dashboard lokal.
+
+**Maksud sederhana:** Hasil mudah dibuka di browser.
+
+### Mengapa JSON mirror?
+
+**Teknis:** Dashboard membaca file ringkas, bukan HDFS langsung.
+
+**Maksud sederhana:** Halaman lebih cepat dan sederhana.
+
+### Mengapa simulator?
+
+**Teknis:** Simulator menjaga pipeline tetap testable saat API gagal.
+
+**Maksud sederhana:** Demo tetap berjalan.
+
+## Batasan dan Rekomendasi
+
+| Area | Batasan | Rekomendasi |
+| --- | --- | --- |
+| Token contoh | Token nyata tidak ideal di `.env.example`. | Ganti dengan placeholder sebelum publik. |
+| Kafka | Satu broker dan replication factor topic 1. | Tambah broker untuk produksi. |
+| RSS | Filter keyword sederhana. | Tambahkan NLP jika butuh presisi. |
+| Spark | RSS belum dianalisis formal. | Tambahkan join RSS dan AQI per jam. |
+| Notebook | `HDFS_BASE` hardcoded. | Baca dari environment agar fleksibel. |
+| Flask | Debug mode cocok lokal saja. | Matikan debug untuk publik. |
+
+## Glosarium
+
+### AQI
+
+**Teknis:** `AQI` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Indeks kualitas udara
+
+### Producer
+
+**Teknis:** `Producer` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Pengirim data
+
+### Consumer
+
+**Teknis:** `Consumer` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Pembaca data
+
+### Topic
+
+**Teknis:** `Topic` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Saluran Kafka
+
+### Offset
+
+**Teknis:** `Offset` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Posisi baca
+
+### HDFS
+
+**Teknis:** `HDFS` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Gudang file terdistribusi
+
+### Istilah NameNode
+
+**Teknis:** `NameNode` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Daftar isi HDFS
+
+### Istilah DataNode
+
+**Teknis:** `DataNode` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Penyimpan block
+
+### Spark
+
+**Teknis:** `Spark` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Mesin analisis
+
+### Flask
+
+**Teknis:** `Flask` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Server web
+
+### Parquet
+
+**Teknis:** `Parquet` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** Format kolumnar
+
+### NDJSON
+
+**Teknis:** `NDJSON` adalah istilah teknis dalam sistem ini.
+
+**Maksud sederhana:** JSON per baris
+
+## Lampiran Rinci
+
+### Lampiran 1: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 2: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 3: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 4: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 5: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 6: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 7: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 8: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 9: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 10: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 11: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 12: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 13: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 14: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 15: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 16: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 17: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 18: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 19: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 20: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 21: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 22: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 23: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 24: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 25: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 26: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 27: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 28: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 29: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 30: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 31: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 32: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 33: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 34: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 35: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 36: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 37: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 38: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 39: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 40: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 41: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 42: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 43: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 44: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 45: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 46: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 47: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 48: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 49: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 50: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 51: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 52: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 53: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 54: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 55: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 56: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 57: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 58: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 59: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 60: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 61: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 62: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 63: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 64: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 65: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 66: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 67: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 68: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 69: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 70: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 71: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 72: Browser
+
+**Teknis:** Browser bertugas menampilkan dashboard. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Browser adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 73: Producer API
+
+**Teknis:** Producer API bertugas membangun event AQI. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer API adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 74: Producer RSS
+
+**Teknis:** Producer RSS bertugas membangun event RSS. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Producer RSS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 75: Kafka
+
+**Teknis:** Kafka bertugas menyimpan message. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Kafka adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 76: Consumer
+
+**Teknis:** Consumer bertugas menulis batch. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Consumer adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 77: HDFS
+
+**Teknis:** HDFS bertugas menyimpan historis. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** HDFS adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 78: Spark
+
+**Teknis:** Spark bertugas menghitung insight. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Spark adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+### Lampiran 79: Flask
+
+**Teknis:** Flask bertugas menyediakan API. Detail ini penting karena pipeline hanya mudah dirawat jika tanggung jawab setiap modul jelas.
+
+**Maksud sederhana:** Flask adalah salah satu bagian rantai dari data mentah sampai tampilan pengguna.
+
+## Kesimpulan
+
+AirQuality Alert adalah pipeline Big Data dari ingestion sampai dashboard.
+
+Kafka menjadi antrian data.
+
+HDFS menjadi penyimpanan historis.
+
+Spark menjadi mesin analisis.
+
+Flask menjadi layer presentasi.
+
+README utama ini menjelaskan sistem; catatan progres berada di `CHECKLIST.md`.
 
 ## Referensi
 
 - [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
-- [Hadoop HDFS Design](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HdfsDesign.html)
-- [Apache Spark SQL](https://spark.apache.org/docs/latest/sql-programming-guide.html)
+- [Apache Hadoop HDFS Design](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HdfsDesign.html)
+- [Apache Spark SQL Guide](https://spark.apache.org/docs/latest/sql-programming-guide.html)
+- [Flask Documentation](https://flask.palletsprojects.com/)
 - [AQICN API](https://aqicn.org/api/)
-- [bde2020 / big-data-europe Docker Hadoop](https://github.com/big-data-europe/docker-hadoop) (pola serupa)
+- [Chart.js Documentation](https://www.chartjs.org/docs/latest/)
