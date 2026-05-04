@@ -42,6 +42,8 @@ from typing import Any, Dict, List, Optional
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 
+from rss_util import is_blocked_detik_url
+
 try:
     from hdfs import InsecureClient  # type: ignore
 except ImportError:  # pragma: no cover
@@ -76,6 +78,12 @@ TOPIC_RSS = os.environ.get("KAFKA_TOPIC_RSS", "airquality-rss")
 
 GROUP_ID_API = os.environ.get("CONSUMER_GROUP_API", "airquality-consumer-api")
 GROUP_ID_RSS = os.environ.get("CONSUMER_GROUP_RSS", "airquality-consumer-rss")
+
+
+def _rss_record_blocked(rec: Dict[str, Any]) -> bool:
+    return is_blocked_detik_url(str(rec.get("link", ""))) or is_blocked_detik_url(
+        str(rec.get("source_feed", ""))
+    )
 
 
 _shutdown = threading.Event()
@@ -176,11 +184,17 @@ def update_dashboard_mirror(kind: str, records: List[Dict[str, Any]]) -> None:
                 with outfile.open("r", encoding="utf-8") as f:
                     prev_data = json.load(f)
                 if isinstance(prev_data, dict) and isinstance(prev_data.get("items"), list):
-                    existing = [r for r in prev_data["items"] if isinstance(r, dict)]
+                    existing = [
+                        r
+                        for r in prev_data["items"]
+                        if isinstance(r, dict) and not _rss_record_blocked(r)
+                    ]
             except (json.JSONDecodeError, OSError):
                 pass
         seen = {r.get("id"): r for r in existing if r.get("id")}
         for rec in records:
+            if _rss_record_blocked(rec):
+                continue
             rid = rec.get("id")
             if rid:
                 seen[rid] = rec
@@ -188,7 +202,7 @@ def update_dashboard_mirror(kind: str, records: List[Dict[str, Any]]) -> None:
             seen.values(),
             key=lambda r: r.get("timestamp_ingest", ""),
             reverse=True,
-        )[:50]
+        )[:20]
         payload = {
             "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "items": merged_items,
@@ -241,17 +255,28 @@ def consume_topic(
         if not buffer:
             last_flush = time.time()
             return
+        to_write: List[Dict[str, Any]] = buffer
+        if subdir == "rss":
+            to_write = [r for r in buffer if not _rss_record_blocked(r)]
+            dropped = len(buffer) - len(to_write)
+            if dropped:
+                log.info("[%s] Buang %d pesan sumber detik.com", topic, dropped)
         try:
-            path = write_to_hdfs(hdfs_client, subdir, buffer)
+            if not to_write:
+                consumer.commit()
+                buffer = []
+                last_flush = time.time()
+                return
+            path = write_to_hdfs(hdfs_client, subdir, to_write)
             log.info(
                 "[%s] FLUSH (%s) %d record → hdfs://%s",
                 topic,
                 reason,
-                len(buffer),
+                len(to_write),
                 path,
             )
             try:
-                update_dashboard_mirror(mirror_kind, buffer)
+                update_dashboard_mirror(mirror_kind, to_write)
             except Exception as exc:  # noqa: BLE001
                 log.exception("Mirror dashboard gagal: %s", exc)
             consumer.commit()

@@ -16,6 +16,8 @@ import feedparser
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
+from rss_util import filter_feed_urls, is_blocked_detik_url
+
 try:
     from dotenv import load_dotenv
 
@@ -29,7 +31,9 @@ log = logging.getLogger("producer_rss")
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
 TOPIC = os.environ.get("KAFKA_TOPIC_RSS", "airquality-rss")
-POLL_INTERVAL_SEC = int(os.environ.get("POLL_INTERVAL_SEC_RSS", "300"))  # 5 menit (rubrik)
+POLL_INTERVAL_SEC = int(
+    os.environ.get("POLL_INTERVAL_SEC_RSS", "2592000")
+)  # default 720 jam (30 hari); rubrik 5 menit pakai 300 di .env
 SEEN_IDS_FILE = os.environ.get(
     "RSS_SEEN_IDS_FILE",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen_ids.json"),
@@ -37,12 +41,22 @@ SEEN_IDS_FILE = os.environ.get(
 MAX_SEEN_IDS = int(os.environ.get("RSS_MAX_SEEN_IDS", "5000"))
 
 DEFAULT_FEEDS = [
-    "https://news.detik.com/rss",
-    "https://rss.tempo.co/nasional",
-    "https://rss.tempo.co/tag/polusi",
+    "https://rss.kontan.co.id/news/nasional",
+    "https://feed.liputan6.com/rss/news",
+    "http://rss.tempo.co/nasional",
+    "https://www.cnbcindonesia.com/news/rss",
+    "https://www.cnnindonesia.com/nasional/rss",
+    "https://www.jawapos.com/nasional/rss",
     "https://rss.kompas.com/feed/kompas.com/sains/environment",
+    "http://rss.tempo.co/tag/polusi",
 ]
-RSS_FEEDS = [u.strip() for u in os.environ.get("RSS_FEEDS", "").split(",") if u.strip()] or DEFAULT_FEEDS
+_raw_feeds = [u.strip() for u in os.environ.get("RSS_FEEDS", "").split(",") if u.strip()] or list(DEFAULT_FEEDS)
+RSS_FEEDS = filter_feed_urls(_raw_feeds)
+if not RSS_FEEDS:
+    log.error(
+        "RSS_FEEDS kosong setelah membuang detik.com — memakai default delapan feed (nasional + lingkungan)."
+    )
+    RSS_FEEDS = filter_feed_urls(list(DEFAULT_FEEDS))
 
 ENV_KEYWORDS = [
     "polusi", "udara", "kualitas udara", "lingkungan", "aqi", "emisi", "asap", "kabut",
@@ -51,6 +65,11 @@ ENV_KEYWORDS = [
     "rokok", "perokok", "merokok", "asap rokok", "vape", "vaping", "rokok elektrik",
     "one push", "one push vape", "baygon", "insektisida", "aerosol", "racun serangga",
     "nuklir", "radiasi", "radioaktif", "reaktor", "limbah nuklir",
+    "iklim", "iklim berubah", "perubahan iklim", "pemanasan global", "el nino", "la nina",
+    "cuaca ekstrem", "banjir", "longsor", "erosi", "kekeringan", "gurun",
+    "reboisasi", "penghijauan", "energi terbarukan", "plts", "pltu", "emisi karbon",
+    "sungai", "daerah aliran", "pesisir", "laut", "mikroplastik", "plastik", "sampah",
+    "daur ulang", "sirkular", "ozon", "rumah kaca", "gas rumah kaca",
 ]
 RSS_KEYWORDS = [
     k.strip().lower()
@@ -118,6 +137,8 @@ def build_event(entry: Any, feed_url: str) -> Optional[Dict[str, Any]]:
     link = (entry.get("link") or "").strip()
     title = (entry.get("title") or "").strip()
     if not link or not title:
+        return None
+    if is_blocked_detik_url(link) or is_blocked_detik_url(feed_url):
         return None
     summary = strip_html(entry.get("summary") or entry.get("description") or "")
     published = (

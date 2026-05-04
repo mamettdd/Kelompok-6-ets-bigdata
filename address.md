@@ -44,7 +44,7 @@ Dokumen ini menjelaskan **di mana file/folder berada** di repositori dan **untuk
 | File | Tujuan |
 |------|--------|
 | `producer_api.py` | Membaca **AQICN** (atau **simulator** bila token kosong/gagal), mengirim event JSON ke topik **`airquality-api`**, kunci = slug kota, interval default 15 menit. |
-| `producer_rss.py` | Membaca **RSS** (URL dari `RSS_FEEDS`), filter keyword, deduplikasi, mengirim ke topik **`airquality-rss`**, kunci = hash URL, interval default 5 menit. |
+| `producer_rss.py` | Membaca **RSS** (URL dari `RSS_FEEDS`), filter keyword, deduplikasi, mengirim ke topik **`airquality-rss`**, kunci = hash URL. Interval polling dari **`POLL_INTERVAL_SEC_RSS`** (`.env`, mis. sebulan ≈ 2592000 detik). |
 | `consumer_to_hdfs.py` | Dua *thread* consumer (satu per topik), **buffer** lalu **flush** ke HDFS; mirror ke `dashboard/data/live_*.json`; opsi `HDFS_WRITE_MODE=docker_exec` untuk WSL2. |
 | `seen_ids.json` | Menyimpan ID artikel RSS yang sudah pernah dikirim (dedup). **Dibuat saat runtime**, biasanya di `.gitignore`. |
 

@@ -15,6 +15,9 @@ from flask import Flask, jsonify, render_template, request, send_from_directory
 app = Flask(__name__)
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
+# Panel berita: maksimal item per respons API (pipeline mengirim relevan=false hanya jika fallback umum)
+RSS_DASHBOARD_LIMIT = 7
+
 # Contoh agar demonstrasi jalan sebelum consumer & Spark selesai
 DEMO_LIVE_API: List[Dict[str, Any]] = [
     {
@@ -54,27 +57,63 @@ DEMO_LIVE_API: List[Dict[str, Any]] = [
     },
 ]
 
+# Pratinjau dashboard (hanya dipakai jika live_rss.json tidak ada — tanpa kata "Contoh")
 DEMO_LIVE_RSS: List[Dict[str, Any]] = [
     {
-        "title": "Contoh: Asap rokok dan polusi udara perlu diwaspadai",
+        "title": "Polusi udara dan emisi transportasi memengaruhi kualitas napas perkotaan",
+        "link": "https://www.cnnindonesia.com",
+        "summary": "Paparan partikulat dan gas dari kendaraan serta industri berkaitan dengan kesehatan pernapasan; pemantauan AQI membantu masyarakat.",
+        "published": "",
+        "timestamp_ingest": "",
+        "relevant": True,
+    },
+    {
+        "title": "Lingkungan hidup: pengelolaan limbah dan ruang hijau perkotaan",
+        "link": "https://www.cnbcindonesia.com",
+        "summary": "Pemilahan sampah, pengurangan plastik sekali pakai, dan ruang terbuka hijau berkontribusi pada kualitas udara mikro di sekitar permukiman.",
+        "published": "",
+        "timestamp_ingest": "",
+        "relevant": True,
+    },
+    {
+        "title": "Kualitas udara dalam ruangan: aerosol, ventilasi, dan paparan kimia",
+        "link": "https://www.jawapos.com",
+        "summary": "Pemakaian aerosol dan produk rumah tangga perlu diimbangi sirkulasi udara agar konsentrasi polutan dalam ruangan tidak menumpuk.",
+        "published": "",
+        "timestamp_ingest": "",
+        "relevant": True,
+    },
+    {
+        "title": "Perubahan iklim, cuaca ekstrem, dan tekanan pada ekosistem pesisir",
+        "link": "https://www.kontan.co.id",
+        "summary": "Pola cuaca yang lebih keras dapat memperburuk banjir, erosi, dan kualitas air—kaitannya dengan kebijakan mitigasi lingkungan terus dibahas.",
+        "published": "",
+        "timestamp_ingest": "",
+        "relevant": True,
+    },
+    {
+        "title": "Karhutla dan asap: dampak jangka pendek pada indeks kualitas udara",
+        "link": "https://www.liputan6.com",
+        "summary": "Kebakaran hutan dan lahan menaikkan konsentrasi PM2.5 dan mempengaruhi wilayah jauh dari sumber api; mitigasi penting di musim kering.",
+        "published": "",
+        "timestamp_ingest": "",
+        "relevant": True,
+    },
+    {
+        "title": "Energi dan transisi: emisi pembangkit serta peran energi terbarukan",
         "link": "https://www.tempo.co",
-        "summary": "Paparan asap rokok, emisi kendaraan, dan polusi udara dapat memengaruhi kesehatan pernapasan masyarakat.",
-        "published": "2026-04-27",
-        "timestamp_ingest": "2026-04-27T10:00:00+00:00",
+        "summary": "Struktur pasokan listrik memengaruhi intensitas emisi gas rumah kaca; pengembangan EBT skala tepat jadi bagian strategi lingkungan.",
+        "published": "",
+        "timestamp_ingest": "",
+        "relevant": True,
     },
     {
-        "title": "Contoh: Aerosol dan obat serangga perlu digunakan dengan bijak",
-        "link": "https://www.kompas.com",
-        "summary": "Produk aerosol seperti obat serangga dapat memengaruhi kualitas udara dalam ruangan bila digunakan berlebihan.",
-        "published": "2026-04-27",
-        "timestamp_ingest": "2026-04-27T10:00:00+00:00",
-    },
-    {
-        "title": "Contoh: Isu nuklir dan radiasi perlu pengawasan ketat",
-        "link": "https://www.detik.com",
-        "summary": "Aktivitas berisiko tinggi seperti radiasi dan limbah nuklir perlu pengawasan karena dapat berdampak pada manusia dan lingkungan.",
-        "published": "2026-04-27",
-        "timestamp_ingest": "2026-04-27T10:00:00+00:00",
+        "title": "Kesehatan masyarakat: ISPA dan kelompok rentan saat udara buruk",
+        "link": "https://www.cnnindonesia.com",
+        "summary": "Saat indeks kualitas udara memburuk, kelompok anak dan lansia lebih rentan; edukasi perilaku dan masker filtrasi relevan di wilayah padat.",
+        "published": "",
+        "timestamp_ingest": "",
+        "relevant": True,
     },
 ]
 
@@ -227,15 +266,16 @@ def normalize_live_api(raw: Any) -> List[Dict[str, Any]]:
 
 
 def normalize_live_rss(raw: Any) -> List[Dict[str, Any]]:
+    """File hilang → demo. File ada tapi items kosong [] → tiada demo (bukan data contoh)."""
     if raw is None:
         return [dict(x) for x in DEMO_LIVE_RSS]
-    if isinstance(raw, dict) and raw.get("items") and isinstance(raw["items"], list):
-        return [dict(x) for x in raw["items"]]
+    if isinstance(raw, dict) and isinstance(raw.get("items"), list):
+        return [dict(x) for x in raw["items"] if isinstance(x, dict)]
     if isinstance(raw, dict) and (raw.get("title") or raw.get("link")):
         return [dict(raw)]
     if isinstance(raw, list) and raw:
         return [dict(x) for x in raw if isinstance(x, dict)]
-    return [dict(x) for x in DEMO_LIVE_RSS]
+    return []
 
 
 def build_payload(force_all_demo: bool = False) -> Dict[str, Any]:
@@ -249,6 +289,11 @@ def build_payload(force_all_demo: bool = False) -> Dict[str, Any]:
     spark = normalize_spark(spark_raw)
     live_api = normalize_live_api(api_raw)
     live_rss = normalize_live_rss(rss_raw)
+    live_rss = [
+        dict(x)
+        for x in live_rss
+        if x.get("relevant", True) is not False
+    ][:RSS_DASHBOARD_LIMIT]
 
     for row in live_api:
         aqi = float(row.get("aqi", 0) or 0)
@@ -257,7 +302,7 @@ def build_payload(force_all_demo: bool = False) -> Dict[str, Any]:
         row["category_class"] = css
 
     missing_api = force_all_demo or load_json_file("live_api.json") is None
-    missing_rss = force_all_demo or load_json_file("live_rss.json") is None
+    missing_rss = force_all_demo or rss_raw is None
     missing_spark = force_all_demo or load_json_file("spark_results.json") is None
 
     return {

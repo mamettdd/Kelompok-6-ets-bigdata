@@ -97,7 +97,7 @@ Proyek ini adalah pipeline Big Data untuk memantau kualitas udara beberapa kota 
 ```text
 +----------------------+       +----------------------+
 | AQICN API            |       | RSS Feeds            |
-| atau Simulator       |       | Detik/Tempo/Kompas   |
+| atau Simulator       |       | Kontan/Liputan6/Tempo/CNBC/CNN/Jawa Pos |
 +----------+-----------+       +----------+-----------+
            |                              |
            v                              v

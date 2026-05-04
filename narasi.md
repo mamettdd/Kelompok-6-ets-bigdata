@@ -172,8 +172,8 @@ Token `AQICN_TOKEN` dan `FORCE_SIMULATOR` mengatur pakai sumber sungguhan atau s
 
 ```mermaid
 flowchart TD
-  START2([Jalan terus]) --> WAIT2[Jeda default 300 dtk / 5 menit]
-  WAIT2 --> FETCH[Ambil beberapa feed RSS dari RSS_FEEDS atau default Detik Tempo Kompas]
+  START2([Jalan terus]) --> WAIT2[Jeda dari POLL_INTERVAL_SEC_RSS misalnya 720 jam]
+  WAIT2 --> FETCH[Ambil beberapa feed RSS dari RSS_FEEDS atau default media nasional]
   FETCH --> PARSE[Parse judul link ringkasan waktu terbit]
   PARSE --> KW{Judul atau ringkasan mengandung RSS_KEYWORDS?}
   KW -->|tidak cukup| FALL[Ambil fallback top N RSS_FALLBACK_TOPN]
@@ -375,7 +375,7 @@ flowchart LR
 ## Cerita naratif singkat (mengikut nomor diagram)
 
 1. **Luar** memberi angka AQI dan berita **RSS**.
-2. **`producer_api.py`** lima kota, polling ~15 menit; **`producer_rss.py`** feed terkonfigurasi, filter kata kunci, dedup, polling ~5 menit.
+2. **`producer_api.py`** lima kota, polling ~15 menit; **`producer_rss.py`** feed terkonfigurasi, filter kata kunci, dedup, interval RSS dari `.env` (mis. ~720 jam).
 3. **Kafka** menyimpan dua aliran di **topik terpisah** dengan **kunci** berbeda.
 4. **`consumer_to_hdfs.py`** dua **utas**, dua **grup konsumen**, buffer lalu **flush** ke **NDJSON** di HDFS dan ke **`live_*.json`**.
 5. **`spark/analysis.ipynb`** membaca arsip API, menghasilkan **tiga analisis** dan menulis **HDFS hasil** + **`spark_results.json`**.

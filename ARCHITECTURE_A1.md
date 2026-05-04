@@ -103,7 +103,7 @@ flowchart LR
     subgraph Sumber["Sumber Data Eksternal"]
         AQICN["AQICN API<br/>Data AQI real-time"]
         SIM["Simulator AQI<br/>Fallback offline"]
-        RSS["RSS Feeds<br/>Detik, Tempo, Kompas"]
+        RSS["RSS Feeds<br/>Kontan, Liputan6, Tempo, CNBC, CNN, Jawa Pos"]
     end
 
     subgraph Ingest["Lapisan Ingestion Python"]

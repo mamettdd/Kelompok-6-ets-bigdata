@@ -93,7 +93,7 @@
 - [x] Hash URL untuk key: `hashlib.md5(entry.link.encode()).hexdigest()`
 - [x] Tambah field `timestamp_ingest`
 - [x] Ubah interval ke **5 menit** (`POLL_INTERVAL_SEC_RSS=300`)
-- [x] **Feed RSS**: default mencakup sumber yang hidup (mis. Detik root, Tempo nasional) + cadangan rubrik; `RSS_FEEDS` / `RSS_KEYWORDS` / `RSS_FALLBACK_TOPN` di `.env` (lihat README)
+- [x] **Feed RSS**: default Kontan, Liputan6, Tempo, CNBC Indonesia, CNN Indonesia, Jawa Pos (nasional/news); `RSS_FEEDS` / `RSS_KEYWORDS` / `RSS_FALLBACK_TOPN` di `.env` (lihat README)
 - [x] `feedparser` + **User-Agent**; filter keyword lingkungan + fallback top-N jika filter kosong
 - [ ] Test: jalankan 2 kali, pastikan tidak ada duplikat di topic ← **eksekusi user**
 

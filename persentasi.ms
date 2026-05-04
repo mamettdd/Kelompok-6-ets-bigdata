@@ -61,7 +61,7 @@ flowchart LR
     subgraph Sumber["Sumber Data Eksternal"]
         AQICN["AQICN API<br/>Data AQI real-time"]
         SIM["Simulator AQI<br/>Fallback offline"]
-        RSS["RSS Feeds<br/>Detik, Tempo, Kompas"]
+        RSS["RSS Feeds<br/>Kontan, Liputan6, Tempo, CNBC, CNN, Jawa Pos"]
     end
 
     subgraph Ingest["Lapisan Ingestion Python"]
@@ -141,7 +141,7 @@ Diagram ini adalah peta utama seluruh sistem. Diagram ini menjelaskan semua lapi
 
 | Kotak / Node | Penjelasan |
 | --- | --- |
-| `Sumber Data Eksternal` | Berisi `AQICN API`, `Simulator AQI`, dan `RSS Feeds`. AQICN adalah sumber data kualitas udara nyata. Simulator adalah cadangan jika token kosong atau API gagal. RSS Feeds adalah sumber konteks berita dari Detik, Tempo, dan Kompas. |
+| `Sumber Data Eksternal` | Berisi `AQICN API`, `Simulator AQI`, dan `RSS Feeds`. AQICN adalah sumber data kualitas udara nyata. Simulator adalah cadangan jika token kosong atau API gagal. RSS Feeds adalah sumber konteks berita dari Kontan, Liputan6, Tempo, CNBC Indonesia, CNN Indonesia, dan Jawa Pos. |
 | `Lapisan Ingestion Python` | Berisi `producer_api.py` dan `producer_rss.py`. Dua file ini bertugas mengambil data dari luar, membentuk payload JSON, lalu mengirimkannya ke Kafka. |
 | `Apache Kafka` | Berisi topic `airquality-api` dan `airquality-rss`. Kafka menjadi antrian data agar producer tidak langsung bergantung pada HDFS atau dashboard. |
 | `Consumer dan Sink` | Berisi `consumer_to_hdfs.py` dan mirror `dashboard/data`. Consumer membaca Kafka, melakukan buffer, menulis ke HDFS, dan membuat file JSON lokal untuk dashboard. |
